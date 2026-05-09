@@ -144,6 +144,13 @@ class BackendSync {
     }
   }
 
+  // Rutas protegidas — devuelve null sin hacer la petición si no hay token
+  _authGet(path)        { return this._accessToken ? this._request('GET',  path, undefined) : Promise.resolve(null); }
+  _authPost(path, body) { return this._accessToken ? this._request('POST', path, body)      : Promise.resolve(null); }
+  _authPut(path, body)  { return this._accessToken ? this._request('PUT',  path, body)      : Promise.resolve(null); }
+
+  get isAuthenticated() { return !!this._accessToken; }
+
   _get(path)         { return this._request('GET',    path, undefined); }
   _post(path, body)  { return this._request('POST',   path, body);      }
   _put(path, body)   { return this._request('PUT',    path, body);      }
@@ -287,54 +294,36 @@ class BackendSync {
 
   async syncUserProfile(data) {
     if (!data?.externalId) return null;
-    if (!this._accessToken) return null;
-    return this._put('/api/v1/auth/profile', data);
+    return this._authPut('/api/v1/auth/profile', data);
   }
 
   // ── SYNC DE ML (Phase 3) ─────────────────────────────────────
 
   syncDetectedMeal() { return Promise.resolve(null); }
 
-  /**
-   * Inicia sesión de repeticiones en backend.
-   * Retorna { sessionId, mode, fallback? } — si Python no está disponible,
-   * sessionId tendrá prefijo "local_" y mode = "mediapipe".
-   */
   async startRepSession(exerciseType) {
-    return this._post('/api/v1/reps/sessions', {
+    return this._authPost('/api/v1/reps/sessions', {
       userId: this.userId,
       exerciseType,
     });
   }
 
   completeRepSession(sessionId, data) {
-    return this._post(`/api/v1/reps/sessions/${sessionId}/complete`, data);
+    return this._authPost(`/api/v1/reps/sessions/${sessionId}/complete`, data);
   }
 
   // ── PHASE 4: MÉTRICAS FÍSICAS ────────────────────────────────
 
-  /**
-   * Calcula IMC, TMB y TDEE usando el perfil físico del usuario.
-   * Requiere que el usuario tenga height_cm, age y gender en el backend.
-   * Retorna { bmi, bmr, tdee, calorie_target } o null.
-   */
   async calculateMetrics(userId, physicalData = {}) {
-    return this._post('/api/v1/progress/metrics', { userId, ...physicalData });
+    return this._authPost('/api/v1/progress/metrics', { userId, ...physicalData });
   }
 
-  /**
-   * Genera rutina personalizada con RAG.
-   * Retorna null si el flag rag_enabled no está activo o Python no está disponible.
-   */
   async generateRoutine(userId) {
-    return this._post('/api/v1/routines/generate', { userId });
+    return this._authPost('/api/v1/routines/generate', { userId });
   }
 
-  /**
-   * Genera plan de dieta semanal con RAG.
-   */
   async generateDiet(userId, weekStart) {
-    return this._post('/api/v1/diets/generate', { userId, weekStart });
+    return this._authPost('/api/v1/diets/generate', { userId, weekStart });
   }
 
   // Devuelve el array de datos aunque la respuesta sea paginada {data, total, ...}
@@ -344,30 +333,29 @@ class BackendSync {
   }
 
   async getWeeklyStats(week) {
-    const result = await this._get(`/api/v1/auth/workout-logs?limit=100&offset=0`);
+    const result = await this._authGet(`/api/v1/auth/workout-logs?limit=100&offset=0`);
     const logs   = this._unwrap(result);
     if (!week) return logs;
-    // Filtrar por semana en cliente (formato YYYY-Www o YYYY-MM-DD de inicio de semana)
     return logs.filter(log => log.date && log.date.startsWith(week.slice(0, 10)));
   }
 
   async getWorkoutLogs(limit = 20, offset = 0) {
-    const result = await this._get(`/api/v1/auth/workout-logs?limit=${limit}&offset=${offset}`);
+    const result = await this._authGet(`/api/v1/auth/workout-logs?limit=${limit}&offset=${offset}`);
     return result || { data: [], total: 0, limit, offset };
   }
 
   async getDietLogs(limit = 20, offset = 0) {
-    const result = await this._get(`/api/v1/auth/diet-logs?limit=${limit}&offset=${offset}`);
+    const result = await this._authGet(`/api/v1/auth/diet-logs?limit=${limit}&offset=${offset}`);
     return result || { data: [], total: 0, limit, offset };
   }
 
   async getProgressLogs(limit = 30, offset = 0) {
-    const result = await this._get(`/api/v1/auth/progress-logs?limit=${limit}&offset=${offset}`);
+    const result = await this._authGet(`/api/v1/auth/progress-logs?limit=${limit}&offset=${offset}`);
     return result || { data: [], total: 0, limit, offset };
   }
 
   async getAiSuggestions(limit = 20, offset = 0) {
-    const result = await this._get(`/api/v1/auth/ai-suggestions?limit=${limit}&offset=${offset}`);
+    const result = await this._authGet(`/api/v1/auth/ai-suggestions?limit=${limit}&offset=${offset}`);
     return result || { data: [], total: 0, limit, offset };
   }
 
