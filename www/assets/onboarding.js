@@ -11,6 +11,8 @@ class OnboardingManager {
     this.currentStep = 0;
     this.userData = {
       name: '',
+      email: '',
+      password: '',
       goal: '',
       startWeight: 0,
       targetWeight: 0
@@ -52,25 +54,41 @@ class OnboardingManager {
           </div>
 
           <div class="onboarding-steps">
-            <!-- STEP 1: Nombre -->
+            <!-- STEP 1: Nombre + Cuenta -->
             <div class="onboarding-step active" data-step="1">
               <div class="step-indicator">
                 <span class="step-number">1</span>
                 <span class="step-total">/ 3</span>
               </div>
-              
-              <h2>¿Cómo te llamas?</h2>
-              <p class="step-subtitle">Un nombre personaliza tu experiencia</p>
-              
+
+              <h2>Crea tu cuenta</h2>
+              <p class="step-subtitle">Tus datos quedan guardados en la nube</p>
+
               <div class="input-group">
-                <input 
-                  type="text" 
-                  id="onboard-name" 
-                  placeholder="Tu nombre" 
+                <input
+                  type="text"
+                  id="onboard-name"
+                  placeholder="Tu nombre"
                   class="onboarding-input"
                   maxlength="30"
+                  autocomplete="name"
                 >
-                <div class="input-hint">Mínimo 2 caracteres</div>
+                <input
+                  type="email"
+                  id="onboard-email"
+                  placeholder="Tu email"
+                  class="onboarding-input"
+                  autocomplete="email"
+                >
+                <input
+                  type="password"
+                  id="onboard-password"
+                  placeholder="Contraseña (mín. 8 caracteres)"
+                  class="onboarding-input"
+                  minlength="8"
+                  autocomplete="new-password"
+                >
+                <div class="input-hint">Mínimo 2 caracteres en el nombre · 8 en la contraseña</div>
               </div>
             </div>
 
@@ -247,12 +265,24 @@ class OnboardingManager {
   validateStep(step) {
     switch (step) {
       case 1:
-        const name = document.getElementById('onboard-name').value.trim();
+        const name     = document.getElementById('onboard-name').value.trim();
+        const email    = document.getElementById('onboard-email').value.trim();
+        const password = document.getElementById('onboard-password').value;
         if (name.length < 2) {
-          this.showError('Por favor ingresa un nombre válido');
+          this.showError('Por favor ingresa un nombre válido (mínimo 2 caracteres)');
           return false;
         }
-        this.userData.name = name;
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+          this.showError('Por favor ingresa un email válido');
+          return false;
+        }
+        if (password.length < 8) {
+          this.showError('La contraseña debe tener al menos 8 caracteres');
+          return false;
+        }
+        this.userData.name     = name;
+        this.userData.email    = email;
+        this.userData.password = password;
         return true;
 
       case 2:
@@ -375,14 +405,20 @@ class OnboardingManager {
    * Completar onboarding
    */
   async complete() {
-    // Guardar datos en IndexedDB
+    // Mapear enums del frontend al formato que espera el backend
+    const GOAL_MAP = { 'weight-loss': 'lose', 'muscle-gain': 'gain', 'maintenance': 'maintain' };
+    const backendGoal = GOAL_MAP[this.userData.goal] || 'maintain';
+
     const user = {
-      name: this.userData.name,
-      goalType: this.userData.goal,
-      startWeight: this.userData.startWeight,
-      targetWeight: this.userData.targetWeight,
-      createdAt: new Date().toISOString(),
-      completedOnboarding: true
+      name:          this.userData.name,
+      email:         this.userData.email,
+      goalType:      this.userData.goal,      // formato frontend (IndexedDB)
+      goal:          backendGoal,             // formato backend
+      startWeight:   this.userData.startWeight,
+      targetWeight:  this.userData.targetWeight,
+      currentWeight: this.userData.startWeight,
+      createdAt:     new Date().toISOString(),
+      completedOnboarding: true,
     };
 
     try {
@@ -392,17 +428,28 @@ class OnboardingManager {
       } else if (!existing) {
         await this.db.addUser(user);
       }
-      
-      // Disparar evento
+
+      // Registrar en el backend inmediatamente (fire-and-forget con credenciales reales)
+      if (window.SYNC) {
+        const uid = String(user.id || Date.now());
+        SYNC.setUserId(uid);
+        SYNC.registerUser({
+          externalId:    uid,
+          name:          user.name,
+          email:         user.email,
+          password:      this.userData.password,
+          weight:        user.startWeight,
+          goal:          backendGoal,
+          completedOnboarding: true,
+        }).catch(() => {});
+      }
+
       window.dispatchEvent(new CustomEvent('onboardingComplete', { detail: user }));
 
-      // Animar cierre
       const modal = document.getElementById('onboarding-modal');
       modal.classList.add('close');
-      
       setTimeout(() => {
         modal.remove();
-        // Actualizar header con nombre
         this.updateHeaderName(user.name);
       }, 300);
     } catch (error) {

@@ -198,22 +198,24 @@ class BackendSync {
 
   async registerUser(profile) {
     if (!profile?.externalId) return null;
+    if (!profile.email || !profile.password) return null; // backend requiere ambos
     try {
       const res = await fetch(`${this.baseUrl}/api/v1/auth/register`, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({
-          name:   profile.name   || '',
-          email:  profile.email  || '',
-          weight: profile.currentWeight || null,
-          goal:   profile.goal   || 'maintain',
+          name:     profile.name     || '',
+          email:    profile.email,
+          password: profile.password,
+          weight:   profile.weight || profile.currentWeight || null,
+          goal:     profile.goal   || 'maintain',
         }),
         signal: AbortSignal.timeout(5000),
       });
       if (!res.ok) return null;
       const data = await res.json().catch(() => null);
       if (data?.accessToken) this._storeTokens(data);
-      else if (data?.token)  localStorage.setItem('ft_token', data.token); // legacy server
+      else if (data?.token)  localStorage.setItem('ft_token', data.token);
       return data;
     } catch {
       return null;
@@ -335,8 +337,38 @@ class BackendSync {
     return this._post('/api/v1/diets/generate', { userId, weekStart });
   }
 
-  getWeeklyStats(week) {
-    return this._get(`/api/v1/auth/workout-logs?week=${encodeURIComponent(week)}`);
+  // Devuelve el array de datos aunque la respuesta sea paginada {data, total, ...}
+  _unwrap(result) {
+    if (!result) return [];
+    return Array.isArray(result) ? result : (result.data || []);
+  }
+
+  async getWeeklyStats(week) {
+    const result = await this._get(`/api/v1/auth/workout-logs?limit=100&offset=0`);
+    const logs   = this._unwrap(result);
+    if (!week) return logs;
+    // Filtrar por semana en cliente (formato YYYY-Www o YYYY-MM-DD de inicio de semana)
+    return logs.filter(log => log.date && log.date.startsWith(week.slice(0, 10)));
+  }
+
+  async getWorkoutLogs(limit = 20, offset = 0) {
+    const result = await this._get(`/api/v1/auth/workout-logs?limit=${limit}&offset=${offset}`);
+    return result || { data: [], total: 0, limit, offset };
+  }
+
+  async getDietLogs(limit = 20, offset = 0) {
+    const result = await this._get(`/api/v1/auth/diet-logs?limit=${limit}&offset=${offset}`);
+    return result || { data: [], total: 0, limit, offset };
+  }
+
+  async getProgressLogs(limit = 30, offset = 0) {
+    const result = await this._get(`/api/v1/auth/progress-logs?limit=${limit}&offset=${offset}`);
+    return result || { data: [], total: 0, limit, offset };
+  }
+
+  async getAiSuggestions(limit = 20, offset = 0) {
+    const result = await this._get(`/api/v1/auth/ai-suggestions?limit=${limit}&offset=${offset}`);
+    return result || { data: [], total: 0, limit, offset };
   }
 
   // ── UTILIDADES ───────────────────────────────────────────────
