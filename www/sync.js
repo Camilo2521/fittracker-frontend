@@ -17,9 +17,10 @@
 
 class BackendSync {
   constructor() {
-    this._baseUrl = null;
-    this._userId  = null;
-    this._queue   = [];
+    this._baseUrl        = null;
+    this._userId         = null;
+    this._queue          = [];
+    this._refreshing     = null; // Promise in-flight, prevents concurrent refresh attempts
     this._loadQueue();
     window.addEventListener('online', () => this._flushQueue());
   }
@@ -49,13 +50,74 @@ class BackendSync {
     localStorage.setItem('fittracker_user_id', this._userId);
   }
 
+  // ── GESTIÓN DE TOKENS ────────────────────────────────────────
+
+  get _accessToken() {
+    return localStorage.getItem('ft_access_token') || localStorage.getItem('ft_token') || null;
+  }
+
+  get _refreshToken() {
+    return localStorage.getItem('ft_refresh_token') || null;
+  }
+
+  _storeTokens({ accessToken, refreshToken }) {
+    if (accessToken)  localStorage.setItem('ft_access_token', accessToken);
+    if (refreshToken) localStorage.setItem('ft_refresh_token', refreshToken);
+    // keep legacy key in sync so older code still works
+    if (accessToken)  localStorage.setItem('ft_token', accessToken);
+  }
+
+  _clearTokens() {
+    localStorage.removeItem('ft_access_token');
+    localStorage.removeItem('ft_refresh_token');
+    localStorage.removeItem('ft_token');
+  }
+
   // ── HTTP HELPERS ─────────────────────────────────────────────
 
   _headers() {
-    return {
-      'Content-Type': 'application/json',
-      'x-user-id':    this.userId,
-    };
+    const h = { 'Content-Type': 'application/json', 'x-user-id': this.userId };
+    const token = this._accessToken;
+    if (token) h['Authorization'] = `Bearer ${token}`;
+    return h;
+  }
+
+  async _fetchOnce(method, path, body) {
+    const opts = { method, headers: this._headers(), signal: AbortSignal.timeout(5000) };
+    if (body !== undefined) opts.body = JSON.stringify(body);
+    return fetch(`${this.baseUrl}${path}`, opts);
+  }
+
+  async _tryRefresh() {
+    // Deduplicate: if a refresh is already in flight, wait for it
+    if (this._refreshing) return this._refreshing;
+
+    const raw = this._refreshToken;
+    if (!raw) return false;
+
+    this._refreshing = (async () => {
+      try {
+        const res = await fetch(`${this.baseUrl}/api/v1/auth/refresh`, {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ refreshToken: raw }),
+          signal:  AbortSignal.timeout(5000),
+        });
+        if (!res.ok) { this._clearTokens(); return false; }
+        const { accessToken } = await res.json();
+        if (accessToken) {
+          localStorage.setItem('ft_access_token', accessToken);
+          localStorage.setItem('ft_token', accessToken);
+        }
+        return !!accessToken;
+      } catch {
+        return false;
+      } finally {
+        this._refreshing = null;
+      }
+    })();
+
+    return this._refreshing;
   }
 
   async _request(method, path, body) {
@@ -64,14 +126,16 @@ class BackendSync {
       return null;
     }
     try {
-      const opts = {
-        method,
-        headers: this._headers(),
-        signal:  AbortSignal.timeout(5000),
-      };
-      if (body !== undefined) opts.body = JSON.stringify(body);
+      const res = await this._fetchOnce(method, path, body);
 
-      const res = await fetch(`${this.baseUrl}${path}`, opts);
+      if (res.status === 401) {
+        const refreshed = await this._tryRefresh();
+        if (!refreshed) return null;
+        const retry = await this._fetchOnce(method, path, body);
+        if (!retry.ok) return null;
+        return await retry.json().catch(() => null);
+      }
+
       if (!res.ok) return null;
       return await res.json().catch(() => null);
     } catch {
@@ -130,16 +194,63 @@ class BackendSync {
     this._saveQueue();
   }
 
-  // ── REGISTRO DE USUARIO (Phase 2) ────────────────────────────
+  // ── REGISTRO / LOGIN / LOGOUT ────────────────────────────────
 
   async registerUser(profile) {
     if (!profile?.externalId) return null;
-    return this._post('/api/v1/auth/register', {
-      name:  profile.name  || '',
-      email: profile.email || '',
-      weight: profile.currentWeight || null,
-      goal:   profile.goal || 'maintain',
-    });
+    try {
+      const res = await fetch(`${this.baseUrl}/api/v1/auth/register`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({
+          name:   profile.name   || '',
+          email:  profile.email  || '',
+          weight: profile.currentWeight || null,
+          goal:   profile.goal   || 'maintain',
+        }),
+        signal: AbortSignal.timeout(5000),
+      });
+      if (!res.ok) return null;
+      const data = await res.json().catch(() => null);
+      if (data?.accessToken) this._storeTokens(data);
+      else if (data?.token)  localStorage.setItem('ft_token', data.token); // legacy server
+      return data;
+    } catch {
+      return null;
+    }
+  }
+
+  async login(email, password) {
+    try {
+      const res = await fetch(`${this.baseUrl}/api/v1/auth/login`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ email, password }),
+        signal:  AbortSignal.timeout(5000),
+      });
+      if (!res.ok) return null;
+      const data = await res.json().catch(() => null);
+      if (data?.accessToken) this._storeTokens(data);
+      else if (data?.token)  localStorage.setItem('ft_token', data.token);
+      return data;
+    } catch {
+      return null;
+    }
+  }
+
+  async logout() {
+    const refreshToken = this._refreshToken;
+    if (refreshToken) {
+      try {
+        await fetch(`${this.baseUrl}/api/v1/auth/logout`, {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ refreshToken }),
+          signal:  AbortSignal.timeout(3000),
+        });
+      } catch {}
+    }
+    this._clearTokens();
   }
 
   // ── SYNC DE DATOS CORE (Phase 2) ─────────────────────────────
@@ -156,16 +267,8 @@ class BackendSync {
 
   async syncUserProfile(data) {
     if (!data?.externalId) return null;
-    // PATCH /api/v1/auth/profile con token JWT si está disponible
-    const token = localStorage.getItem('ft_token');
-    if (!token) return null;
-    try {
-      const opts = { method: 'PUT', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify(data), signal: AbortSignal.timeout(5000) };
-      const res  = await fetch(`${this.baseUrl}/api/v1/auth/profile`, opts);
-      return res.ok ? res.json().catch(() => null) : null;
-    } catch {
-      return null;
-    }
+    if (!this._accessToken) return null;
+    return this._put('/api/v1/auth/profile', data);
   }
 
   // ── SYNC DE ML (Phase 3) ─────────────────────────────────────
