@@ -771,9 +771,9 @@ const BACKEND   = _isNative ? AppConfig.api.deviceUrl : AppConfig.api.baseUrl;
 
 const AUTH = {
   token: null, user: null,
-  save(t,u){ this.token=t; this.user=u; localStorage.setItem('ft_token',t); localStorage.setItem('ft_user',JSON.stringify(u)); },
-  load(){ this.token=localStorage.getItem('ft_token'); try{ this.user=JSON.parse(localStorage.getItem('ft_user')||'null'); }catch{ this.user=null; } return !!(this.token&&this.user); },
-  clear(){ this.token=null; this.user=null; localStorage.removeItem('ft_token'); localStorage.removeItem('ft_user'); },
+  save(t,u){ this.token=t; this.user=u; localStorage.setItem('ft_token',t); localStorage.setItem('ft_access_token',t); localStorage.setItem('ft_user',JSON.stringify(u)); },
+  load(){ this.token=localStorage.getItem('ft_access_token')||localStorage.getItem('ft_token'); try{ this.user=JSON.parse(localStorage.getItem('ft_user')||'null'); }catch{ this.user=null; } return !!(this.token&&this.user); },
+  clear(){ this.token=null; this.user=null; localStorage.removeItem('ft_token'); localStorage.removeItem('ft_access_token'); localStorage.removeItem('ft_refresh_token'); localStorage.removeItem('ft_user'); },
   headers(){ return {'Content-Type':'application/json',...(this.token?{'Authorization':'Bearer '+this.token}:{})}; },
   async refresh(){ if(!this.token) return false; try{ const r=await fetch(BACKEND+'/auth/me',{headers:this.headers(),signal:AbortSignal.timeout(4000)}); if(!r.ok){this.clear();return false;} this.user=await r.json(); localStorage.setItem('ft_user',JSON.stringify(this.user)); return true; }catch{ return false; } },
 };
@@ -797,7 +797,8 @@ async function authLogin(){
     const res=await fetch(BACKEND+'/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password})});
     const data=await res.json();
     if(!res.ok) return _authError(data.error||'Error al iniciar sesión');
-    AUTH.save(data.token,data.user);
+    AUTH.save(data.accessToken||data.token,data.user);
+    if(data.refreshToken) localStorage.setItem('ft_refresh_token',data.refreshToken);
     await _onAuthSuccess();
   }catch{ _authError('No se pudo conectar al servidor. ¿Está corriendo el backend?'); }
   finally{ if(btn){btn.disabled=false;btn.textContent='Entrar';} }
@@ -824,7 +825,8 @@ async function authRegister(){
     const res=await fetch(BACKEND+'/auth/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,email,password,goal,activityLevel:actLevel,weight,height,age,gender,restrictions})});
     const data=await res.json();
     if(!res.ok) return _authError(data.error||'Error al registrarse');
-    AUTH.save(data.token,data.user);
+    AUTH.save(data.accessToken||data.token,data.user);
+    if(data.refreshToken) localStorage.setItem('ft_refresh_token',data.refreshToken);
     await _onAuthSuccess();
   }catch{ _authError('No se pudo conectar al servidor. ¿Está corriendo el backend?'); }
   finally{ if(btn){btn.disabled=false;btn.textContent='Crear mi cuenta';} }
