@@ -1,0 +1,5 @@
+package com.extremo.tracker;
+
+import com.getcapacitor.BridgeActivity;
+
+public class MainActivity extends BridgeActivity {}
