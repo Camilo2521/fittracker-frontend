@@ -253,6 +253,24 @@ class BackendSync {
     this._clearTokens();
   }
 
+  async deleteAccount(password) {
+    if (!password) throw new Error('Se requiere la contraseña');
+    const token = this._accessToken;
+    if (!token) throw new Error('No hay sesión activa');
+    const res = await fetch(`${this.baseUrl}/api/v1/auth/me`, {
+      method:  'DELETE',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body:    JSON.stringify({ password }),
+      signal:  AbortSignal.timeout(8000),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || 'Error al eliminar la cuenta');
+    }
+    this._clearTokens();
+    return true;
+  }
+
   // ── SYNC DE DATOS CORE (Phase 2) ─────────────────────────────
   // Estos datos viven en IndexedDB (offline-first). Las rutas legacy
   // /api/weights, /api/goals, etc. ya no existen en el backend v1.
