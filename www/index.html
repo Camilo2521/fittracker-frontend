@@ -618,6 +618,31 @@ body {
 .reg-step-dot.done { background: #4DEB6E; }
 .reg-step-dot.active { background: #4DEB6E88; }
 
+/* ── Modal de perfil ── */
+#profile-modal {
+  position: fixed; inset: 0; z-index: 9100;
+  background: rgba(0,0,0,.65); display: none;
+  align-items: flex-end; justify-content: center;
+}
+#profile-modal.open { display: flex; }
+.profile-sheet {
+  width: 100%; max-width: 480px;
+  background: #142018; border-radius: 22px 22px 0 0;
+  padding: 20px 20px 36px; max-height: 90vh; overflow-y: auto;
+}
+.profile-sheet-title {
+  font-size: 16px; font-weight: 700; color: #fff;
+  margin-bottom: 4px;
+}
+.profile-sheet-sub {
+  font-size: 12px; color: #ffffff55; margin-bottom: 18px;
+}
+.profile-close-btn {
+  position: absolute; top: 14px; right: 16px;
+  background: none; border: none; color: #ffffff66;
+  font-size: 20px; cursor: pointer; padding: 4px 8px;
+}
+
 /* ── Cámara de escaneo ── */
 #scan-modal {
   position: fixed; inset: 0; z-index: 9500;
@@ -1688,24 +1713,15 @@ async function _analyzeFood(){
         <button class="auth-btn" onclick="regNextStep()">Siguiente →</button>
       </div>
 
-      <!-- Paso 2: Escaneo corporal IA -->
+      <!-- Paso 2: Escaneo corporal IA (próximamente) -->
       <div id="reg-step-1" style="display:none;text-align:center;">
         <div style="font-size:40px;margin-bottom:10px;">📸</div>
         <div style="font-size:15px;font-weight:700;color:#fff;margin-bottom:6px;">Escaneo corporal IA</div>
-        <div style="font-size:12px;color:#ffffff66;margin-bottom:16px;line-height:1.5;">
-          Activa la cámara y colócate de cuerpo completo.<br>
-          La IA analizará tu complexión y te sugerirá el plan ideal.
+        <div style="font-size:12px;color:#ffffff55;margin-bottom:16px;line-height:1.5;background:#ffffff08;padding:12px;border-radius:10px;">
+          🚧 Función en desarrollo — próximamente podrás analizar tu complexión con la cámara.<br><br>
+          Continúa al siguiente paso para ingresar tus datos manualmente.
         </div>
-        <div id="scan-result-card">
-          <div class="scan-badge">✓ Análisis completado</div>
-          <div class="scan-row">Complexión <span id="sr-type">—</span></div>
-          <div class="scan-row">IMC estimado <span id="sr-bmi">—</span></div>
-          <div class="scan-row">Objetivo sugerido <span id="sr-goal">—</span></div>
-          <div class="scan-row">Actividad sugerida <span id="sr-activity">—</span></div>
-          <div style="font-size:11px;color:#ffffff55;margin-top:8px;line-height:1.4;" id="sr-obs"></div>
-        </div>
-        <button class="auth-btn" id="scan-open-btn" onclick="openScanModal()">Activar cámara</button>
-        <button class="auth-btn secondary" onclick="regNextStep()">Omitir este paso</button>
+        <button class="auth-btn" onclick="regNextStep()">Continuar →</button>
       </div>
 
       <!-- Paso 3: Datos físicos -->
@@ -1760,6 +1776,62 @@ async function _analyzeFood(){
         <button class="auth-btn secondary" onclick="regGoStep(1)">← Atrás</button>
       </div>
     </div>
+  </div>
+</div>
+
+<!-- PROFILE EDIT MODAL -->
+<div id="profile-modal">
+  <div class="profile-sheet" style="position:relative;">
+    <button class="profile-close-btn" onclick="closeProfileEdit()">✕</button>
+    <div class="profile-sheet-title" id="profile-modal-title">Editar perfil</div>
+    <div class="profile-sheet-sub" id="profile-modal-sub">Actualiza tus datos para recibir recomendaciones personalizadas</div>
+    <div class="auth-grid">
+      <div class="auth-field">
+        <label>Objetivo</label>
+        <select id="prof-goal">
+          <option value="maintain">Mantenerme</option>
+          <option value="lose">Perder peso</option>
+          <option value="gain">Ganar músculo</option>
+        </select>
+      </div>
+      <div class="auth-field">
+        <label>Actividad</label>
+        <select id="prof-activity">
+          <option value="sedentary">Sedentario</option>
+          <option value="light">Ligero</option>
+          <option value="moderate">Moderado</option>
+          <option value="active">Activo</option>
+          <option value="very_active">Muy activo</option>
+        </select>
+      </div>
+      <div class="auth-field">
+        <label>Peso (kg)</label>
+        <input id="prof-weight" type="number" placeholder="70" min="30" max="250" step="0.1">
+      </div>
+      <div class="auth-field">
+        <label>Altura (cm)</label>
+        <input id="prof-height" type="number" placeholder="170" min="100" max="250">
+      </div>
+      <div class="auth-field">
+        <label>Edad</label>
+        <input id="prof-age" type="number" placeholder="25" min="10" max="100">
+      </div>
+      <div class="auth-field">
+        <label>Sexo</label>
+        <select id="prof-gender">
+          <option value="">Prefiero no decir</option>
+          <option value="male">Masculino</option>
+          <option value="female">Femenino</option>
+          <option value="other">Otro</option>
+        </select>
+      </div>
+    </div>
+    <div class="auth-field">
+      <label>Restricciones alimentarias</label>
+      <input id="prof-restrictions" type="text" placeholder="gluten, lácteos, mariscos...">
+    </div>
+    <div id="profile-modal-error" style="display:none;color:#ff6b6b;font-size:12px;margin-bottom:8px;"></div>
+    <button class="auth-btn" onclick="saveProfileEdit()" id="prof-save-btn">Guardar cambios</button>
   </div>
 </div>
 
@@ -2067,6 +2139,22 @@ async function _analyzeFood(){
       <div id="weekly-stats">
         <p style="font-size:13px;color:var(--text3);padding:6px 0">Calculando estadísticas...</p>
       </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Exportar historial</div>
+      <div style="display:flex;gap:10px;padding:4px 0;">
+        <button class="auth-btn" style="flex:1;padding:11px;font-size:13px;" onclick="exportarCSV('workouts')">⬇ Entrenamientos CSV</button>
+        <button class="auth-btn secondary" style="flex:1;padding:11px;font-size:13px;" onclick="exportarCSV('progress')">⬇ Peso / Progreso CSV</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Notificaciones</div>
+      <p style="font-size:12px;color:var(--text3);margin:0 0 12px;">Recordatorios de agua, motivación diaria y alertas de racha.</p>
+      <button class="auth-btn" id="notif-toggle-btn" onclick="toggleNotifications()" style="font-size:13px;padding:11px;">
+        Activar notificaciones
+      </button>
     </div>
 
   </div><!-- /reportes -->
@@ -2409,7 +2497,57 @@ async function load() {
     }
   }
   
+  // Enriquecer con datos del backend (fire-and-forget, no bloquea la UI)
+  _syncFromBackend().catch(() => {});
+
   console.log('[FitTracker] App loaded successfully');
+}
+
+// ── Sincronización dashboard ← backend ───────────────────────────────────────
+async function _syncFromBackend() {
+  if (!AUTH.token || !window.SYNC?.isAuthenticated) return;
+
+  try {
+    // 1. Pesos desde registros_progreso (backend es fuente de verdad)
+    const progRes = await SYNC.getProgressLogs(60, 0);
+    const progLogs = progRes?.data || [];
+    if (progLogs.length) {
+      const backendWeights = progLogs
+        .filter(p => p.peso != null)
+        .map(p => ({ date: p.fecha, val: parseFloat(p.peso) }));
+
+      const backendDates = new Set(backendWeights.map(w => w.date));
+      const localOnly    = S.weights.filter(w => !backendDates.has(w.date));
+      S.weights = [...backendWeights, ...localOnly]
+        .sort((a, b) => b.date.localeCompare(a.date));
+
+      if (S.weights.length && !AUTH.user?.weight) S.peso = S.weights[0].val;
+    }
+
+    // 2. Entrenamientos de la semana desde registros_entrenamiento
+    const wkMon  = _currentMonday ? _currentMonday() : new Date().toISOString().slice(0, 10);
+    const wkLogs = await SYNC.getWeeklyStats(wkMon);
+    if (Array.isArray(wkLogs) && wkLogs.length) {
+      const wk = weekKey ? weekKey() : null;
+      if (wk) {
+        wkLogs.forEach(log => {
+          if (!log.fecha) return;
+          const d   = new Date(log.fecha + 'T12:00:00');
+          const idx = (d.getDay() + 6) % 7; // lunes=0
+          S.days[wk + '_' + idx] = true;
+        });
+      }
+    }
+
+    // 3. Actualizar UI si ya está visible
+    if (typeof updateDash          === 'function') updateDash();
+    if (typeof updateWeeklyStats   === 'function') updateWeeklyStats();
+    if (document.getElementById('weeklyChart')?.closest('.active')) {
+      if (typeof renderWeeklyChart === 'function') renderWeeklyChart();
+    }
+  } catch (e) {
+    console.warn('[backend-sync]', e.message);
+  }
 }
 
 async function save() {
@@ -2464,7 +2602,7 @@ function goPage(id, btn) {
   document.querySelector('.scroll-area').scrollTop = 0;
   if (id === 'peso')  renderWeightChart();
   if (id === 'nutri') { renderPlateChart(); loadPersonalizedNutrition(); }
-  if (id === 'reportes') { renderWeeklyChart(); updateWeeklyStats(); loadGoalSettings(); loadPersonalizedTraining(); }
+  if (id === 'reportes') { renderWeeklyChart(); updateWeeklyStats(); loadGoalSettings(); loadPersonalizedTraining(); _updateNotifBtn(); _syncFromBackend().then(() => { renderWeeklyChart(); updateWeeklyStats(); }).catch(() => {}); }
   if (id === 'ia') { _ensureChatInit(); }
 }
 
@@ -2613,7 +2751,28 @@ function buildGrid() {
     const cell = document.createElement('div');
     cell.className = 'day-cell' + (done ? ' done' : '') + (type === 'descanso' ? ' rest' : '');
     cell.innerHTML = `<span class="dn">${name}</span><span class="dt">${done ? '✓' : DLABEL[type]}</span>`;
-    cell.onclick = () => { S.days[key] = !done; save(); buildGrid(); };
+    cell.onclick = () => {
+      const nowDone = !done;
+      S.days[key] = nowDone;
+      save();
+      buildGrid();
+      // Sync workout completion to backend (only on mark-as-done, not on undo)
+      if (nowDone && AUTH.token) {
+        const monday = _currentMonday();
+        const d = new Date(monday + 'T12:00:00');
+        d.setDate(d.getDate() + i);
+        const dateStr = d.toISOString().slice(0, 10);
+        fetch(`${BACKEND}/auth/workout-log`, {
+          method: 'POST',
+          headers: AUTH.headers(),
+          body: JSON.stringify({
+            routineName: DLABEL[type] || name,
+            exercises: [{ name: type }],
+            date: dateStr,
+          }),
+        }).catch(() => {});
+      }
+    };
     grid.appendChild(cell);
   });
 }
@@ -2622,13 +2781,26 @@ function buildGrid() {
 async function registrarPeso() {
   const v = parseFloat(document.getElementById('peso-input').value);
   if (isNaN(v) || v < 40 || v > 150) return;
-  
+
   try {
     await API.addWeight(v);
     S.weights = (await API.getWeights(100)).map(w => ({ date: w.date, val: w.value }));
     S.peso = S.weights[0].val;
     document.getElementById('peso-input').value = '';
-    updateDash(); 
+
+    // Sync to backend (fire-and-forget)
+    if (AUTH.token) {
+      const dateStr = new Date().toISOString().slice(0, 10);
+      fetch(`${BACKEND}/auth/progress-log`, {
+        method: 'POST',
+        headers: AUTH.headers(),
+        body: JSON.stringify({ weight: v, date: dateStr }),
+      }).then(async r => {
+        if (r.ok && AUTH.user) AUTH.user.weight = v;
+      }).catch(() => {});
+    }
+
+    updateDash();
     renderWeightChart();
     showToast('Peso registrado correctamente');
   } catch (e) {
@@ -3079,6 +3251,15 @@ async function _onAuthSuccess() {
 
   // Reset chat if no history
   if (!_chat.greeted) _ensureChatInit();
+
+  // If onboarding not completed, prompt user to fill in their physical data
+  if (u.completed_onboarding === false) {
+    setTimeout(() => {
+      document.getElementById('profile-modal-title').textContent = '¡Completa tu perfil!';
+      document.getElementById('profile-modal-sub').textContent = 'Agrega tus datos físicos para obtener planes personalizados.';
+      showProfileEdit();
+    }, 800);
+  }
 }
 
 // ── Logout ────────────────────────────────────────────────────────────────────
@@ -3122,7 +3303,85 @@ function showProfileMenu() {
     u.height_cm ? `📏 ${u.height_cm} cm` : '',
   ].filter(Boolean).join('\n');
 
-  if (confirm(`${info}\n\n¿Cerrar sesión?`)) authLogout();
+  const choice = confirm(`${info}\n\nOK = Editar perfil   Cancelar = Cerrar sesión`);
+  if (choice) {
+    document.getElementById('profile-modal-title').textContent = 'Editar perfil';
+    document.getElementById('profile-modal-sub').textContent = 'Actualiza tus datos para recibir recomendaciones personalizadas.';
+    showProfileEdit();
+  } else {
+    if (confirm('¿Cerrar sesión?')) authLogout();
+  }
+}
+
+// ── Edición de perfil ─────────────────────────────────────────────────────────
+function showProfileEdit() {
+  const u = AUTH.user || {};
+  const setVal = (id, v) => { const el = document.getElementById(id); if (el && v != null) el.value = v; };
+  setVal('prof-goal',         u.goal         || 'maintain');
+  setVal('prof-activity',     u.activity_level || u.activityLevel || 'moderate');
+  setVal('prof-weight',       u.weight        || '');
+  setVal('prof-height',       u.height_cm     || '');
+  setVal('prof-age',          u.age           || '');
+  setVal('prof-gender',       u.gender        || '');
+  setVal('prof-restrictions', u.restrictions  || '');
+  const errEl = document.getElementById('profile-modal-error');
+  if (errEl) errEl.style.display = 'none';
+  document.getElementById('profile-modal').classList.add('open');
+}
+
+function closeProfileEdit() {
+  document.getElementById('profile-modal').classList.remove('open');
+}
+
+async function saveProfileEdit() {
+  const btn = document.getElementById('prof-save-btn');
+  const errEl = document.getElementById('profile-modal-error');
+  const goal         = document.getElementById('prof-goal').value;
+  const activityLevel= document.getElementById('prof-activity').value;
+  const weight       = parseFloat(document.getElementById('prof-weight').value) || null;
+  const height       = parseFloat(document.getElementById('prof-height').value) || null;
+  const age          = parseInt(document.getElementById('prof-age').value)       || null;
+  const gender       = document.getElementById('prof-gender').value || null;
+  const restrictions = document.getElementById('prof-restrictions').value.trim() || null;
+
+  if (btn) { btn.disabled = true; btn.textContent = 'Guardando...'; }
+  if (errEl) errEl.style.display = 'none';
+
+  try {
+    const res = await fetch(`${BACKEND}/auth/profile`, {
+      method: 'PUT',
+      headers: AUTH.headers(),
+      body: JSON.stringify({ goal, activityLevel, weight, height, age, gender, restrictions }),
+      signal: AbortSignal.timeout(6000),
+    });
+    if (!res.ok) {
+      const d = await res.json().catch(() => ({}));
+      if (errEl) { errEl.textContent = d.error || 'Error al guardar'; errEl.style.display = 'block'; }
+      return;
+    }
+    const updated = await res.json();
+    // Update AUTH.user with fresh data from backend
+    AUTH.save(AUTH.token, updated);
+    if (window.SYNC && updated.id) SYNC.setUserId(String(updated.id));
+
+    // Update live state
+    if (typeof S !== 'undefined') {
+      if (updated.goal)   S.goal = updated.goal;
+      if (updated.weight) S.peso = updated.weight;
+      if (typeof updateDash === 'function') updateDash();
+      if (typeof updateNutritionBasedOnGoal === 'function') updateNutritionBasedOnGoal();
+    }
+
+    // Update header avatar title
+    const avatar = document.getElementById('hdr-avatar');
+    if (avatar && updated.name) avatar.title = `${updated.name} — ${updated.email}`;
+
+    closeProfileEdit();
+  } catch {
+    if (errEl) { errEl.textContent = 'No se pudo conectar. Intenta de nuevo.'; errEl.style.display = 'block'; }
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Guardar cambios'; }
+  }
 }
 
 // ── Save chat on visibility change ────────────────────────────────────────────
@@ -3368,8 +3627,8 @@ async function calcularMetricasFisicas() {
 
   // Intentar calcular con backend
   let metrics = null;
-  if (window.SYNC && userId) {
-    metrics = await SYNC.calculateMetrics(userId, {
+  if (window.SYNC?.isAuthenticated) {
+    metrics = await SYNC.calculateMetrics({
       heightCm: height, age, gender, activityLevel: activityLvl,
       weight: S.peso || window.currentUser?.currentWeight || 75,
       goal: S.goal || window.currentUser?.goal || 'maintain',
@@ -3765,8 +4024,8 @@ async function descargarDietaPDF(ev) {
   if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
   try {
     const userName = _getUserProfile().name || 'Usuario';
-    const res = await fetch(`${BACKEND.replace('/api/v1','')}/api/v1/pdf/diet`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+    const res = await fetch(`${BACKEND}/pdf/diet`, {
+      method: 'POST', headers: AUTH.headers(),
       body: JSON.stringify({ dietData: _chat.dietPlan, userName }),
       signal: AbortSignal.timeout(20000),
     });
@@ -3780,6 +4039,61 @@ async function descargarDietaPDF(ev) {
     showToast('PDF descargado correctamente');
   } catch (e) { showToast('Error: ' + e.message); }
   finally { if (btn) { btn.disabled = false; btn.textContent = '📄 PDF'; } }
+}
+
+// ── Notificaciones ────────────────────────────────────────────────────────────
+async function toggleNotifications() {
+  if (typeof NOTIFICATIONS === 'undefined') { showToast('Módulo de notificaciones no disponible'); return; }
+  const btn = document.getElementById('notif-toggle-btn');
+  if (Notification.permission === 'denied') {
+    showToast('Las notificaciones están bloqueadas en el navegador. Actívalas desde la configuración del sitio.');
+    return;
+  }
+  if (Notification.permission === 'granted') {
+    showToast('Las notificaciones ya están activas. Desactívalas desde la configuración del navegador.');
+    return;
+  }
+  if (btn) { btn.disabled = true; btn.textContent = 'Solicitando permiso...'; }
+  await setupNotifications();
+  _updateNotifBtn();
+  if (btn) btn.disabled = false;
+}
+
+function _updateNotifBtn() {
+  const btn = document.getElementById('notif-toggle-btn');
+  if (!btn) return;
+  const perm = Notification?.permission || 'default';
+  if (perm === 'granted') {
+    btn.textContent = '✅ Notificaciones activas';
+    btn.classList.add('secondary');
+  } else if (perm === 'denied') {
+    btn.textContent = '🚫 Notificaciones bloqueadas';
+    btn.classList.add('secondary');
+  } else {
+    btn.textContent = 'Activar notificaciones';
+    btn.classList.remove('secondary');
+  }
+}
+
+// ── Exportar historial CSV ────────────────────────────────────────────────────
+async function exportarCSV(type) {
+  if (!AUTH.token) { showToast('Inicia sesión para exportar'); return; }
+  try {
+    showToast('Preparando descarga...');
+    const res = await fetch(`${BACKEND}/auth/export/csv?type=${type}`, {
+      headers: AUTH.headers(),
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!res.ok) { showToast('Error al exportar datos'); return; }
+    const blob = await res.blob();
+    const fname = `fittracker-${type}-${new Date().toISOString().slice(0,10)}.csv`;
+    const a = Object.assign(document.createElement('a'), {
+      href: URL.createObjectURL(blob), download: fname,
+    });
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    showToast('CSV descargado');
+  } catch { showToast('Error de conexión'); }
 }
 
 // ── Inicialización ────────────────────────────────────────────────────────────

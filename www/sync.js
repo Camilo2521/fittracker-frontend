@@ -53,7 +53,7 @@ class BackendSync {
   // ── GESTIÓN DE TOKENS ────────────────────────────────────────
 
   get _accessToken() {
-    return localStorage.getItem('ft_access_token') || localStorage.getItem('ft_token') || null;
+    return localStorage.getItem('ft_access_token') || null;
   }
 
   get _refreshToken() {
@@ -63,14 +63,12 @@ class BackendSync {
   _storeTokens({ accessToken, refreshToken }) {
     if (accessToken)  localStorage.setItem('ft_access_token', accessToken);
     if (refreshToken) localStorage.setItem('ft_refresh_token', refreshToken);
-    // keep legacy key in sync so older code still works
-    if (accessToken)  localStorage.setItem('ft_token', accessToken);
   }
 
   _clearTokens() {
     localStorage.removeItem('ft_access_token');
     localStorage.removeItem('ft_refresh_token');
-    localStorage.removeItem('ft_token');
+    localStorage.removeItem('ft_token'); // limpia sesiones anteriores
   }
 
   // ── HTTP HELPERS ─────────────────────────────────────────────
@@ -107,7 +105,6 @@ class BackendSync {
         const { accessToken } = await res.json();
         if (accessToken) {
           localStorage.setItem('ft_access_token', accessToken);
-          localStorage.setItem('ft_token', accessToken);
         }
         return !!accessToken;
       } catch {
@@ -222,7 +219,6 @@ class BackendSync {
       if (!res.ok) return null;
       const data = await res.json().catch(() => null);
       if (data?.accessToken) this._storeTokens(data);
-      else if (data?.token)  localStorage.setItem('ft_token', data.token);
       return data;
     } catch {
       return null;
@@ -240,7 +236,6 @@ class BackendSync {
       if (!res.ok) return null;
       const data = await res.json().catch(() => null);
       if (data?.accessToken) this._storeTokens(data);
-      else if (data?.token)  localStorage.setItem('ft_token', data.token);
       return data;
     } catch {
       return null;
@@ -324,16 +319,16 @@ class BackendSync {
 
   // ── PHASE 4: MÉTRICAS FÍSICAS ────────────────────────────────
 
-  async calculateMetrics(userId, physicalData = {}) {
-    return this._authPost('/api/v1/progress/metrics', { userId, ...physicalData });
+  async calculateMetrics(physicalData = {}) {
+    return this._authPost('/api/v1/progress/metrics', physicalData);
   }
 
-  async generateRoutine(userId) {
-    return this._authPost('/api/v1/routines/generate', { userId });
+  async generateRoutine() {
+    return this._authPost('/api/v1/routines/generate', {});
   }
 
-  async generateDiet(userId, weekStart) {
-    return this._authPost('/api/v1/diets/generate', { userId, weekStart });
+  async generateDiet(weekStart) {
+    return this._authPost('/api/v1/diets/generate', { weekStart });
   }
 
   // Devuelve el array de datos aunque la respuesta sea paginada {data, total, ...}
