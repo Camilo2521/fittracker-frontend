@@ -102,11 +102,10 @@ class BackendSync {
           signal:  AbortSignal.timeout(5000),
         });
         if (!res.ok) { this._clearTokens(); return false; }
-        const { accessToken } = await res.json();
-        if (accessToken) {
-          localStorage.setItem('ft_access_token', accessToken);
-        }
-        return !!accessToken;
+        const data = await res.json();
+        if (data.accessToken)  localStorage.setItem('ft_access_token',  data.accessToken);
+        if (data.refreshToken) localStorage.setItem('ft_refresh_token', data.refreshToken);
+        return !!data.accessToken;
       } catch {
         return false;
       } finally {

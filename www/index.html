@@ -790,9 +790,10 @@ body {
 
 <script>
 // ── Auth bootstrap (debe estar antes del HTML de auth) ────────────────────────
-// La URL del backend se configura en frontend/www/env.js
-const _isNative = !!(window.Capacitor?.isNativePlatform?.());
-const BACKEND   = _isNative ? AppConfig.api.deviceUrl : AppConfig.api.baseUrl;
+// La URL del backend se resuelve en config.js según window.location.hostname.
+// En dispositivo físico Android/iOS, establece la URL manualmente:
+//   localStorage.setItem('fittracker_backend_url', 'http://192.168.x.x:3000')
+const BACKEND = AppConfig.api.baseUrl;
 
 const AUTH = {
   token: null, user: null,
