@@ -799,6 +799,7 @@ async function authLogin(){
     if(!res.ok) return _authError(data.error||'Error al iniciar sesión');
     AUTH.save(data.accessToken||data.token,data.user);
     if(data.refreshToken) localStorage.setItem('ft_refresh_token',data.refreshToken);
+    if(window.SYNC && data.user?.id) SYNC.setUserId(String(data.user.id));
     await _onAuthSuccess();
   }catch{ _authError('No se pudo conectar al servidor. ¿Está corriendo el backend?'); }
   finally{ if(btn){btn.disabled=false;btn.textContent='Entrar';} }
@@ -819,7 +820,7 @@ async function authRegister(){
   if(!name) return _authError('Ingresa tu nombre');
   if(!email) return _authError('Ingresa tu email');
   if(!password) return _authError('Elige una contraseña');
-  if(password.length<6) return _authError('La contraseña debe tener al menos 6 caracteres');
+  if(password.length<8) return _authError('La contraseña debe tener al menos 8 caracteres');
   if(btn){btn.disabled=true;btn.textContent='Creando cuenta...';}
   try{
     const res=await fetch(BACKEND+'/auth/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,email,password,goal,activityLevel:actLevel,weight,height,age,gender,restrictions})});
@@ -827,6 +828,7 @@ async function authRegister(){
     if(!res.ok) return _authError(data.error||'Error al registrarse');
     AUTH.save(data.accessToken||data.token,data.user);
     if(data.refreshToken) localStorage.setItem('ft_refresh_token',data.refreshToken);
+    if(window.SYNC && data.user?.id) SYNC.setUserId(String(data.user.id));
     await _onAuthSuccess();
   }catch{ _authError('No se pudo conectar al servidor. ¿Está corriendo el backend?'); }
   finally{ if(btn){btn.disabled=false;btn.textContent='Crear mi cuenta';} }
@@ -2361,19 +2363,18 @@ async function load() {
   // IndexedDB is used only as offline cache for local interaction data
   // (daily checks, water, streaks). Profile-level data (goal, weight) comes
   // from the backend first, with IndexedDB as fallback when offline.
+  // Always load IndexedDB goal first (it stores targetWeight, which backend doesn't)
+  const localGoal = await API.getGoal();
+  if (localGoal) { S.goal = localGoal.goal; S.targetWeight = localGoal.targetWeight; }
+
   if (AUTH.user?.goal) {
+    // Backend is source of truth for goal type and current weight
     S.goal = AUTH.user.goal;
     if (AUTH.user.weight) S.peso = AUTH.user.weight;
-    if (AUTH.user.weight) S.targetWeight = AUTH.user.weight;
-  } else {
-    // Offline fallback — use locally cached goal from IndexedDB
-    const goal = await API.getGoal();
-    if (goal) { S.goal = goal.goal; S.targetWeight = goal.targetWeight; }
-  }
-
-  // Sync REST profile goal back to IndexedDB cache so offline reads are fresh
-  if (AUTH.user?.goal && AUTH.user.weight) {
-    API.setGoal(AUTH.user.goal, AUTH.user.weight).catch(() => {});
+    // Keep IndexedDB goal type in sync (preserve existing targetWeight)
+    if (localGoal) {
+      API.setGoal(AUTH.user.goal, localGoal.targetWeight).catch(() => {});
+    }
   }
 
   const weights = await API.getWeights(100);
@@ -2469,7 +2470,9 @@ function goPage(id, btn) {
 
 // ── DASHBOARD ──────────────────────────────────────────────────────────────
 function updateDash() {
-  const a = S.peso, meta = S.targetWeight, ini = S.weights.length ? S.weights[0].val : a;
+  const a    = parseFloat(S.peso)         || 80;
+  const meta = parseFloat(S.targetWeight) || a;
+  const ini  = S.weights.length ? (parseFloat(S.weights[0].val) || a) : a;
   document.getElementById('m-actual').textContent = a;
   document.getElementById('m-target').textContent = meta;
   
@@ -3023,6 +3026,9 @@ async function _onAuthSuccess() {
     restrictions:  u.restrictions,
   };
 
+  // Keep SYNC user ID in sync with the real backend UUID
+  if (window.SYNC && u.id) SYNC.setUserId(String(u.id));
+
   // Update header avatar
   const avatar = document.getElementById('hdr-avatar');
   if (avatar) {
@@ -3050,6 +3056,14 @@ async function _onAuthSuccess() {
       }
     }
   } catch {}
+
+  // Apply backend profile to dashboard state immediately (for manual login case where load() won't re-run)
+  if (typeof S !== 'undefined') {
+    if (u.goal) S.goal = u.goal;
+    if (u.weight) S.peso = u.weight;
+    if (typeof updateDash === 'function') updateDash();
+    if (typeof updateNutritionBasedOnGoal === 'function') updateNutritionBasedOnGoal();
+  }
 
   // Hide auth screen
   const authScreen = document.getElementById('auth-screen');

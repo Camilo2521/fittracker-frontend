@@ -285,7 +285,17 @@ class BackendSync {
   // /api/weights, /api/goals, etc. ya no existen en el backend v1.
 
   syncWeight()   { return Promise.resolve(null); }
-  syncWorkout()  { return Promise.resolve(null); }
+
+  syncWorkout(type, durationMin, intensity, date) {
+    if (!type) return Promise.resolve(null);
+    return this._authPost('/api/v1/auth/workout-log', {
+      date:        date || new Date().toISOString().slice(0, 10),
+      routineName: type,
+      exercises:   [{ name: type, intensity: intensity || 'medium', durationMin }],
+      durationMin: durationMin || null,
+    });
+  }
+
   syncNutrition(){ return Promise.resolve(null); }
   syncMeal()     { return Promise.resolve(null); }
   syncCheck()    { return Promise.resolve(null); }
