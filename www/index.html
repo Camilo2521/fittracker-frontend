@@ -3047,12 +3047,20 @@ async function _onAuthSuccess() {
 
   // Load chat history for FitBot
   try {
-    const hRes = await fetch(`${BACKEND}/auth/chat-history`, { headers: AUTH.headers(), signal: AbortSignal.timeout(4000) });
+    const hRes = await fetch(`${BACKEND}/auth/chat-history?limit=60`, { headers: AUTH.headers(), signal: AbortSignal.timeout(4000) });
     if (hRes.ok) {
-      const rows = await hRes.json();
+      const result = await hRes.json();
+      const rows   = result.data || (Array.isArray(result) ? result : []);
       if (rows.length) {
-        _chat.history = rows.map(r => ({ role: r.role, content: r.content }));
+        _chat.history = rows.map(r => ({ role: r.rol || r.role, content: r.contenido || r.content }));
         _chat.greeted = true;
+        // Render existing messages in the chat UI
+        const box = document.getElementById('chat-messages');
+        if (box && box.children.length === 0) {
+          for (const m of _chat.history.slice(-40)) {
+            _appendMessage(m.role, m.content);
+          }
+        }
       }
     }
   } catch {}
@@ -3430,6 +3438,7 @@ function _getUserProfile() {
   const a = AUTH.user   || {};
   const u = window.currentUser || {};
   return {
+    id:            a.id            || u.id            || null,
     name:          a.name          || u.name          || '',
     goal:          a.goal          || u.goal          || 'maintain',
     weight:        a.weight        || u.weight        || u.current_weight || null,
@@ -3651,7 +3660,7 @@ async function sendChatMessage() {
       const res = await fetch(`${BACKEND}/ai/chat/stream`, {
         method:  'POST',
         headers: AUTH.headers(),
-        body:    JSON.stringify({ messages: _chat.history.slice(-14), userProfile: profile, accountId: profile?.id }),
+        body:    JSON.stringify({ messages: _chat.history.slice(-30), userProfile: profile, accountId: profile?.id }),
         signal:  AbortSignal.timeout(180000),
       });
 
@@ -3691,7 +3700,7 @@ async function sendChatMessage() {
       const res2 = await fetch(`${BACKEND}/ai/chat`, {
         method:  'POST',
         headers: AUTH.headers(),
-        body:    JSON.stringify({ messages: _chat.history.slice(-14), userProfile: profile, accountId: profile?.id }),
+        body:    JSON.stringify({ messages: _chat.history.slice(-30), userProfile: profile, accountId: profile?.id }),
         signal:  AbortSignal.timeout(180000),
       });
       if (!res2.ok) throw new Error(`HTTP ${res2.status}`);
@@ -3727,6 +3736,15 @@ async function sendChatMessage() {
       wrap.appendChild(srcEl);
     }
     _chat.history.push({ role: 'assistant', content: fullResponse });
+
+    // Auto-save every 4 messages (2 intercambios) para persistir la memoria
+    if (AUTH.token && _chat.history.length % 4 === 0) {
+      fetch(`${BACKEND}/auth/chat-history`, {
+        method: 'POST', headers: AUTH.headers(),
+        body: JSON.stringify({ messages: _chat.history.slice(-40) }),
+        keepalive: true,
+      }).catch(() => {});
+    }
 
   } catch (err) {
     const offline = !navigator.onLine || err.name === 'AbortError';
