@@ -111,7 +111,7 @@ class FitTrackerAPI {
         createdAt: new Date().toISOString()
       });
     }
-    if (window.SYNC) SYNC.syncGoal(goal, targetWeight, startWeight, currentWeight).catch(() => {});
+    if (window.SYNC) SYNC.syncGoal({ type: goal, targetWeight, startWeight, currentWeight }).catch(() => {});
   }
 
   async getGoal() {
@@ -149,7 +149,7 @@ class FitTrackerAPI {
         checks: { [checkId]: true }
       });
     }
-    if (window.SYNC) SYNC.syncCheck(checkId, date).catch(() => {});
+    if (window.SYNC) SYNC.syncCheck(checks, date).catch(() => {});
   }
 
   async getDailyChecks(date = this._today()) {
@@ -161,9 +161,11 @@ class FitTrackerAPI {
     const existing = await this._getDailyChecks(date);
     const checks = { ...(existing[0]?.checks || {}), [checkId]: !!completed };
     if (existing.length) {
-      return await DB.update(STORES.dailyChecks, { id: existing[0].id, userId: this.userId, date, checks });
+      await DB.update(STORES.dailyChecks, { id: existing[0].id, userId: this.userId, date, checks });
+    } else {
+      await DB.add(STORES.dailyChecks, { userId: this.userId, date, checks });
     }
-    return await DB.add(STORES.dailyChecks, { userId: this.userId, date, checks });
+    if (window.SYNC) SYNC.syncCheck(checks, date).catch(() => {});
   }
 
   async _getDailyChecks(date) {
@@ -293,11 +295,13 @@ class FitTrackerAPI {
 
   // ── SETTINGS ────────────────────────────────────────────────
   async setSetting(key, value) {
-    return await DB.update(STORES.settings, {
+    const result = await DB.update(STORES.settings, {
       key,
       value,
       userId: this.userId
     });
+    if (window.SYNC) SYNC.putSetting(key, String(value)).catch(() => {});
+    return result;
   }
 
   async getSetting(key, defaultValue = null) {

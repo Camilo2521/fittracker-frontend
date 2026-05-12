@@ -61,34 +61,65 @@ class OnboardingManager {
                 <span class="step-total">/ 3</span>
               </div>
 
-              <h2>Crea tu cuenta</h2>
-              <p class="step-subtitle">Tus datos quedan guardados en la nube</p>
+              <!-- Tabs: Registro / Login -->
+              <div class="auth-tabs">
+                <button class="auth-tab active" data-tab="register">Crear cuenta</button>
+                <button class="auth-tab" data-tab="login">Ya tengo cuenta</button>
+              </div>
 
-              <div class="input-group">
-                <input
-                  type="text"
-                  id="onboard-name"
-                  placeholder="Tu nombre"
-                  class="onboarding-input"
-                  maxlength="30"
-                  autocomplete="name"
-                >
-                <input
-                  type="email"
-                  id="onboard-email"
-                  placeholder="Tu email"
-                  class="onboarding-input"
-                  autocomplete="email"
-                >
-                <input
-                  type="password"
-                  id="onboard-password"
-                  placeholder="Contraseña (mín. 8 caracteres)"
-                  class="onboarding-input"
-                  minlength="8"
-                  autocomplete="new-password"
-                >
-                <div class="input-hint">Mínimo 2 caracteres en el nombre · 8 en la contraseña</div>
+              <!-- Registro -->
+              <div id="tab-register" class="auth-panel">
+                <h2>Crea tu cuenta</h2>
+                <p class="step-subtitle">Tus datos quedan guardados en la nube</p>
+                <div class="input-group">
+                  <input
+                    type="text"
+                    id="onboard-name"
+                    placeholder="Tu nombre"
+                    class="onboarding-input"
+                    maxlength="30"
+                    autocomplete="name"
+                  >
+                  <input
+                    type="email"
+                    id="onboard-email"
+                    placeholder="Tu email"
+                    class="onboarding-input"
+                    autocomplete="email"
+                  >
+                  <input
+                    type="password"
+                    id="onboard-password"
+                    placeholder="Contraseña (mín. 8 caracteres)"
+                    class="onboarding-input"
+                    minlength="8"
+                    autocomplete="new-password"
+                  >
+                  <div class="input-hint">Mínimo 2 caracteres en el nombre · 8 en la contraseña</div>
+                </div>
+              </div>
+
+              <!-- Login -->
+              <div id="tab-login" class="auth-panel" style="display:none">
+                <h2>Inicia sesión</h2>
+                <p class="step-subtitle">Recupera tu cuenta existente</p>
+                <div class="input-group">
+                  <input
+                    type="email"
+                    id="login-email"
+                    placeholder="Tu email"
+                    class="onboarding-input"
+                    autocomplete="email"
+                  >
+                  <input
+                    type="password"
+                    id="login-password"
+                    placeholder="Tu contraseña"
+                    class="onboarding-input"
+                    autocomplete="current-password"
+                  >
+                </div>
+                <button id="btn-login" class="btn-primary" style="margin-top:16px;width:100%">Iniciar sesión</button>
               </div>
             </div>
 
@@ -206,6 +237,15 @@ class OnboardingManager {
     const nextBtn = document.getElementById('onboard-next');
     const prevBtn = document.getElementById('onboard-prev');
 
+    // Auth tabs (Registro / Login)
+    document.querySelectorAll('.auth-tab').forEach(tab => {
+      tab.addEventListener('click', () => this._switchTab(tab.dataset.tab));
+    });
+
+    // Botón login
+    const loginBtn = document.getElementById('btn-login');
+    if (loginBtn) loginBtn.addEventListener('click', () => this._handleLogin());
+
     // Goal cards
     document.querySelectorAll('.goal-card').forEach(card => {
       card.addEventListener('click', () => this.selectGoal(card));
@@ -229,6 +269,74 @@ class OnboardingManager {
         this.nextStep();
       }
     });
+  }
+
+  /**
+   * Cambiar entre tabs Registro / Login
+   */
+  _switchTab(tab) {
+    document.querySelectorAll('.auth-tab').forEach(t => t.classList.remove('active'));
+    document.querySelector(`.auth-tab[data-tab="${tab}"]`).classList.add('active');
+    document.getElementById('tab-register').style.display = tab === 'register' ? '' : 'none';
+    document.getElementById('tab-login').style.display    = tab === 'login'    ? '' : 'none';
+    this._activeTab = tab;
+  }
+
+  /**
+   * Iniciar sesión con cuenta existente
+   */
+  async _handleLogin() {
+    const email    = document.getElementById('login-email').value.trim();
+    const password = document.getElementById('login-password').value;
+
+    if (!email || !password) {
+      this.showError('Ingresa tu email y contraseña');
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      this.showError('Email inválido');
+      return;
+    }
+
+    const btn = document.getElementById('btn-login');
+    btn.disabled = true;
+    btn.textContent = 'Iniciando sesión…';
+
+    try {
+      if (!window.SYNC) throw new Error('Servicio de sincronización no disponible');
+      const data = await SYNC.login(email, password);
+      if (!data?.accessToken) {
+        this.showError('Email o contraseña incorrectos');
+        return;
+      }
+
+      const user = data.user || {};
+      const localUser = {
+        name:                user.name  || email.split('@')[0],
+        email,
+        goal:                user.goal  || 'maintain',
+        startWeight:         user.start_weight   || null,
+        targetWeight:        user.target_weight  || null,
+        currentWeight:       user.weight         || null,
+        completedOnboarding: true,
+        createdAt:           new Date().toISOString(),
+      };
+
+      const newId = await this.db.addUser(localUser);
+      localUser.id = newId;
+      // Prefer backend UUID for API requests; fall back to local key
+      SYNC.setUserId(String(user.id || newId));
+
+      window.dispatchEvent(new CustomEvent('onboardingComplete', { detail: localUser }));
+      const modal = document.getElementById('onboarding-modal');
+      modal.classList.add('close');
+      setTimeout(() => { modal.remove(); this.updateHeaderName(localUser.name); }, 300);
+    } catch (err) {
+      this.showError(err.message || 'Error al iniciar sesión');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Iniciar sesión';
+    }
   }
 
   /**
@@ -265,6 +373,11 @@ class OnboardingManager {
   validateStep(step) {
     switch (step) {
       case 1:
+        // Si está en el tab de login, el flujo es manejado por _handleLogin
+        if (this._activeTab === 'login') {
+          this._handleLogin();
+          return false; // no avanzar pasos
+        }
         const name     = document.getElementById('onboard-name').value.trim();
         const email    = document.getElementById('onboard-email').value.trim();
         const password = document.getElementById('onboard-password').value;
@@ -425,23 +538,28 @@ class OnboardingManager {
       const existing = await this.db.getUser?.().catch(() => null);
       if (existing && existing.completedOnboarding === undefined) {
         await this.db.updateUser({ ...existing, ...user });
+        user.id = existing.id;
       } else if (!existing) {
-        await this.db.addUser(user);
+        const newId = await this.db.addUser(user);
+        user.id = newId;
       }
 
-      // Registrar en el backend inmediatamente (fire-and-forget con credenciales reales)
+      // Registrar en el backend y capturar tokens
       if (window.SYNC) {
         const uid = String(user.id || Date.now());
         SYNC.setUserId(uid);
-        SYNC.registerUser({
-          externalId:    uid,
-          name:          user.name,
-          email:         user.email,
-          password:      this.userData.password,
-          weight:        user.startWeight,
-          goal:          backendGoal,
-          completedOnboarding: true,
-        }).catch(() => {});
+        try {
+          const regData = await SYNC.registerUser({
+            externalId:    uid,
+            name:          user.name,
+            email:         user.email,
+            password:      this.userData.password,
+            weight:        user.startWeight,
+            goal:          backendGoal,
+          });
+          // Prefer backend UUID over local IndexedDB key for API calls
+          if (regData?.user?.id) SYNC.setUserId(String(regData.user.id));
+        } catch { /* non-fatal — user can continue offline */ }
       }
 
       window.dispatchEvent(new CustomEvent('onboardingComplete', { detail: user }));

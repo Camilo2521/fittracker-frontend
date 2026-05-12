@@ -141,9 +141,10 @@ class BackendSync {
   }
 
   // Rutas protegidas — devuelve null sin hacer la petición si no hay token
-  _authGet(path)        { return this._accessToken ? this._request('GET',  path, undefined) : Promise.resolve(null); }
-  _authPost(path, body) { return this._accessToken ? this._request('POST', path, body)      : Promise.resolve(null); }
-  _authPut(path, body)  { return this._accessToken ? this._request('PUT',  path, body)      : Promise.resolve(null); }
+  _authGet(path)          { return this._accessToken ? this._request('GET',    path, undefined) : Promise.resolve(null); }
+  _authPost(path, body)   { return this._accessToken ? this._request('POST',   path, body)      : Promise.resolve(null); }
+  _authPut(path, body)    { return this._accessToken ? this._request('PUT',    path, body)      : Promise.resolve(null); }
+  _authDelete(path, body) { return this._accessToken ? this._request('DELETE', path, body)      : Promise.resolve(null); }
 
   get isAuthenticated() { return !!this._accessToken; }
 
@@ -278,7 +279,13 @@ class BackendSync {
   // Estos datos viven en IndexedDB (offline-first). Las rutas legacy
   // /api/weights, /api/goals, etc. ya no existen en el backend v1.
 
-  syncWeight()   { return Promise.resolve(null); }
+  syncWeight(weight, date) {
+    if (weight == null) return Promise.resolve(null);
+    return this._authPost('/api/v1/auth/progress-log', {
+      date:   date || new Date().toISOString().slice(0, 10),
+      weight: Number(weight),
+    });
+  }
 
   syncWorkout(type, durationMin, intensity, date) {
     if (!type) return Promise.resolve(null);
@@ -290,11 +297,43 @@ class BackendSync {
     });
   }
 
-  syncNutrition(){ return Promise.resolve(null); }
+  syncNutrition(data) {
+    if (!data) return Promise.resolve(null);
+    return this._authPost('/api/v1/auth/diet-log', {
+      date:      data.date   || new Date().toISOString().slice(0, 10),
+      planName:  data.planName || data.name || null,
+      meals:     data.meals  || [],
+      totalKcal: data.totalKcal || data.calories || null,
+      notes:     data.notes  || null,
+    });
+  }
+
   syncMeal()     { return Promise.resolve(null); }
-  syncCheck()    { return Promise.resolve(null); }
-  syncWater()    { return Promise.resolve(null); }
-  syncGoal()     { return Promise.resolve(null); }
+
+  syncCheck(checks, date) {
+    if (!checks) return Promise.resolve(null);
+    return this._authPut('/api/v1/habits/daily-check', {
+      checks: typeof checks === 'object' ? checks : {},
+      date:   date || new Date().toISOString().slice(0, 10),
+    });
+  }
+
+  syncWater(vasos, date, ml) {
+    if (vasos == null) return Promise.resolve(null);
+    return this._authPut('/api/v1/habits/water', {
+      vasos: Number(vasos),
+      ml:    ml != null ? Number(ml) : undefined,
+      date:  date || new Date().toISOString().slice(0, 10),
+    });
+  }
+
+  syncGoal(goal) {
+    if (!goal) return Promise.resolve(null);
+    return this._authPut('/api/v1/auth/profile', {
+      goal:          goal.type   || goal.goal   || null,
+      target_weight: goal.pesoMeta || goal.targetWeight || null,
+    });
+  }
 
   async syncUserProfile(data) {
     if (!data?.externalId) return null;
@@ -303,7 +342,23 @@ class BackendSync {
 
   // ── SYNC DE ML (Phase 3) ─────────────────────────────────────
 
-  syncDetectedMeal() { return Promise.resolve(null); }
+  syncDetectedMeal(meal) {
+    if (!meal?.name) return Promise.resolve(null);
+    return this._authPost('/api/v1/meals', {
+      name:        meal.name,
+      date:        meal.date || new Date().toISOString().slice(0, 10),
+      calories:    meal.calories   || 0,
+      protein:     meal.protein    || 0,
+      carbs:       meal.carbs      || 0,
+      fat:         meal.fat        || 0,
+      confidence:  meal.confidence ?? null,
+      detectedBy:  meal.detectedBy || 'ia',
+    });
+  }
+
+  getMeals(date) {
+    return this._authGet(`/api/v1/meals${date ? `?date=${date}` : ''}`);
+  }
 
   async startRepSession(exerciseType) {
     return this._authPost('/api/v1/reps/sessions', {
@@ -314,6 +369,19 @@ class BackendSync {
 
   completeRepSession(sessionId, data) {
     return this._authPost(`/api/v1/reps/sessions/${sessionId}/complete`, data);
+  }
+
+  // ── HÁBITOS DIARIOS ──────────────────────────────────────────
+
+  getWater(date)         { return this._authGet(`/api/v1/habits/water${date ? `?date=${date}` : ''}`); }
+  getDailyCheck(date)    { return this._authGet(`/api/v1/habits/daily-check${date ? `?date=${date}` : ''}`); }
+
+  // ── CONFIGURACIÓN ─────────────────────────────────────────────
+
+  getSetting(key)        { return this._authGet(`/api/v1/settings/${encodeURIComponent(key)}`); }
+  getSettings()          { return this._authGet('/api/v1/settings'); }
+  putSetting(key, value) {
+    return this._authPut(`/api/v1/settings/${encodeURIComponent(key)}`, { value: String(value) });
   }
 
   // ── PHASE 4: MÉTRICAS FÍSICAS ────────────────────────────────

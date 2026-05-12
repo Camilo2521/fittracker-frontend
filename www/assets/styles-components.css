@@ -319,6 +319,46 @@
   box-shadow: var(--green-glow);
 }
 
+/* Auth tabs (Registro / Login) */
+.auth-tabs {
+  display: flex;
+  gap: 4px;
+  background: var(--bg-input);
+  border-radius: var(--r-sm);
+  padding: 4px;
+  margin-bottom: 20px;
+}
+
+.auth-tab {
+  flex: 1;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  border: none;
+  border-radius: calc(var(--r-sm) - 2px);
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.auth-tab.active {
+  background: var(--bg-card);
+  color: var(--text-1);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+
+.auth-panel h2 {
+  margin-bottom: 4px;
+}
+
+.input-hint {
+  font-size: 11px;
+  color: var(--text-3);
+  margin-top: 4px;
+  padding: 0 4px;
+}
+
 /* Animación de cierre */
 .onboarding-card.close {
   animation: scaleOut 0.3s ease forwards;

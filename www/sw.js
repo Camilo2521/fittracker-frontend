@@ -17,7 +17,12 @@ const NO_CACHE = new Set(['/', '/index.html', '/sw.js', '/api.js', '/db.js',
 
 self.addEventListener('install', e => {
   console.log('[SW] ' + SW_VERSION + ' instalando');
-  self.skipWaiting();
+  // No hacer skipWaiting automático para no interrumpir sesiones activas.
+  // El cliente emite SKIP_WAITING solo cuando está listo para actualizar.
+});
+
+self.addEventListener('message', e => {
+  if (e.data?.type === 'SKIP_WAITING') self.skipWaiting();
 });
 
 self.addEventListener('activate', e => {

@@ -121,41 +121,36 @@ class FitTrackerApp {
   }
 
   /**
-   * Sincronizar usuario ya-onboarded al backend (por si nunca se registró).
-   * Se llama en cada inicio; el backend hace upsert silencioso.
+   * Sincronizar perfil al backend si hay sesión activa.
+   * Solo actualiza perfil (PUT /auth/profile) — no intenta registrar sin email/password.
    */
   async syncUserToBackend() {
     try {
-      if (!window.SYNC) return;
+      if (!window.SYNC || !SYNC.isAuthenticated) return;
       const user = window.currentUser;
       if (!user || !user.completedOnboarding) return;
 
       const uid = String(user.id);
       SYNC.setUserId(uid);
-      await SYNC.registerUser({
+      await SYNC.syncUserProfile({
         externalId:    uid,
-        name:          user.name          || 'Usuario',
-        currentWeight: user.currentWeight || null,
-        targetWeight:  user.targetWeight  || null,
-        goal:          user.goal          || null,
-        completedOnboarding: true,
+        name:          user.name          || undefined,
+        weight:        user.currentWeight || undefined,
+        goal:          user.goal          || undefined,
+        target_weight: user.targetWeight  || undefined,
       });
     } catch (e) {
-      console.warn('[sync] Auto-registro de usuario falló silenciosamente:', e.message);
+      console.warn('[sync] Sync de perfil falló silenciosamente:', e.message);
     }
   }
 
   /**
    * Registrar Service Worker
+   * El ciclo de vida del SW se gestiona en index.html mediante SKIP_WAITING.
+   * No se desregistra aquí para preservar las capacidades offline.
    */
   registerServiceWorker() {
-    if ('serviceWorker' in navigator) {
-      // Limpia todos los SW para evitar problemas de caché
-      navigator.serviceWorker.getRegistrations().then(regs => {
-        regs.forEach(r => r.unregister());
-      });
-      caches.keys().then(keys => keys.forEach(k => caches.delete(k)));
-    }
+    // no-op: handled by index.html
   }
 
   /**

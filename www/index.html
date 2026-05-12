@@ -16,11 +16,26 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 
-<!-- Limpiar Service Workers para evitar caché vieja -->
+<!-- Service Worker: solo en contexto web (http/https), no en Capacitor nativo -->
 <script>
-if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.getRegistrations().then(r => r.forEach(sw => sw.unregister()));
-  if (window.caches) caches.keys().then(ks => ks.forEach(k => caches.delete(k)));
+if ('serviceWorker' in navigator &&
+    (location.protocol === 'https:' || location.protocol === 'http:')) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js', { scope: '/' })
+      .then(reg => {
+        // Activar inmediatamente si hay una nueva versión esperando
+        if (reg.waiting) reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+        reg.addEventListener('updatefound', () => {
+          const nw = reg.installing;
+          if (nw) nw.addEventListener('statechange', () => {
+            if (nw.state === 'installed' && navigator.serviceWorker.controller) {
+              nw.postMessage({ type: 'SKIP_WAITING' });
+            }
+          });
+        });
+      })
+      .catch(err => console.warn('[SW] No se pudo registrar:', err.message));
+  });
 }
 </script>
 
@@ -1249,11 +1264,9 @@ function closeCameraModal(){
   if(_cueTimer){ clearInterval(_cueTimer); _cueTimer=null; }
   document.getElementById('camera-modal').classList.remove('open');
   const video=document.getElementById('cam-modal-video'); if(video) video.srcObject=null;
-  if(_repCount>0 && _camExercise && AUTH.token){
+  if(_repCount>0 && _camExercise && window.SYNC?.isAuthenticated){
     const dur=Math.max(1,Math.round(_repElapsed/60));
-    fetch(BACKEND+'/auth/workout-log',{method:'POST',headers:AUTH.headers(),
-      body:JSON.stringify({routineName:_camExercise,exercises:[{name:_camExercise,reps:_repCount}],durationMin:dur})
-    }).catch(()=>{});
+    SYNC.syncWorkout(_camExercise, dur, 'medium').catch(()=>{});
   }
 }
 
@@ -2540,7 +2553,20 @@ async function _syncFromBackend() {
       }
     }
 
-    // 3. Actualizar UI si ya está visible
+    // 3. Agua del día de hoy desde consumo_agua
+    const todayDate = new Date().toISOString().slice(0, 10);
+    const waterRes  = await SYNC.getWater(todayDate);
+    if (waterRes?.vasos != null) {
+      S.water[todayDate] = Number(waterRes.vasos);
+    }
+
+    // 4. Controles diarios de hoy desde controles_diarios
+    const checkRes = await SYNC.getDailyCheck(todayDate);
+    if (checkRes?.checks && typeof checkRes.checks === 'object') {
+      S.checks[todayDate] = { ...(S.checks[todayDate] || {}), ...checkRes.checks };
+    }
+
+    // 5. Actualizar UI si ya está visible
     if (typeof updateDash          === 'function') updateDash();
     if (typeof updateWeeklyStats   === 'function') updateWeeklyStats();
     if (document.getElementById('weeklyChart')?.closest('.active')) {
@@ -2758,20 +2784,12 @@ function buildGrid() {
       save();
       buildGrid();
       // Sync workout completion to backend (only on mark-as-done, not on undo)
-      if (nowDone && AUTH.token) {
+      if (nowDone && window.SYNC?.isAuthenticated) {
         const monday = _currentMonday();
         const d = new Date(monday + 'T12:00:00');
         d.setDate(d.getDate() + i);
         const dateStr = d.toISOString().slice(0, 10);
-        fetch(`${BACKEND}/auth/workout-log`, {
-          method: 'POST',
-          headers: AUTH.headers(),
-          body: JSON.stringify({
-            routineName: DLABEL[type] || name,
-            exercises: [{ name: type }],
-            date: dateStr,
-          }),
-        }).catch(() => {});
+        SYNC.syncWorkout(DLABEL[type] || name, null, 'medium', dateStr).catch(() => {});
       }
     };
     grid.appendChild(cell);
@@ -2789,17 +2807,8 @@ async function registrarPeso() {
     S.peso = S.weights[0].val;
     document.getElementById('peso-input').value = '';
 
-    // Sync to backend (fire-and-forget)
-    if (AUTH.token) {
-      const dateStr = new Date().toISOString().slice(0, 10);
-      fetch(`${BACKEND}/auth/progress-log`, {
-        method: 'POST',
-        headers: AUTH.headers(),
-        body: JSON.stringify({ weight: v, date: dateStr }),
-      }).then(async r => {
-        if (r.ok && AUTH.user) AUTH.user.weight = v;
-      }).catch(() => {});
-    }
+    // Keep AUTH.user.weight in sync (API.addWeight already called SYNC.syncWeight)
+    if (AUTH.user) AUTH.user.weight = v;
 
     updateDash();
     renderWeightChart();
@@ -3253,6 +3262,9 @@ async function _onAuthSuccess() {
   // Reset chat if no history
   if (!_chat.greeted) _ensureChatInit();
 
+  // Hydrate dashboard with backend data after login
+  _syncFromBackend().catch(() => {});
+
   // If onboarding not completed, prompt user to fill in their physical data
   if (u.completed_onboarding === false) {
     setTimeout(() => {
@@ -3276,6 +3288,7 @@ async function authLogout() {
     } catch {}
   }
   _chat.history = []; _chat.greeted = false; _chat.dietPlan = null;
+  if (window.SYNC) await SYNC.logout().catch(() => {});
   AUTH.clear();
   window.currentUser = null;
   const authScreen = document.getElementById('auth-screen');
