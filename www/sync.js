@@ -440,7 +440,7 @@ class BackendSync {
   // ── REPS (listado) ───────────────────────────────────────────
 
   getRepSessions(limit = 20, offset = 0) {
-    return this._authGet(`/api/v1/reps/sessions?limit=${limit}&offset=${offset}`);
+    return this._authGet(`/api/v1/reps/history?limit=${limit}&offset=${offset}`);
   }
 
   // ── YOLO ─────────────────────────────────────────────────────

@@ -1037,6 +1037,14 @@ function regNextStep(){
 // ── Escaneo corporal ──────────────────────────────────────────────────────────
 let _scanStream = null;
 
+function openScanModalReg(){
+  // Sincronizar selección de género del paso 2 al select oculto del paso 3
+  const scanGender = document.getElementById('scan-gender-sel');
+  const regGender  = document.getElementById('reg-gender');
+  if(scanGender && regGender && scanGender.value) regGender.value = scanGender.value;
+  openScanModal();
+}
+
 async function openScanModal(){
   const modal=document.getElementById('scan-modal');
   const video=document.getElementById('scan-video');
@@ -1077,34 +1085,50 @@ function startScanCountdown(){
 async function captureAndAnalyze(){
   const video=document.getElementById('scan-video');
   const lbl=document.getElementById('scan-label');
-  lbl.textContent='Analizando con IA...';
+  lbl.textContent='Analizando con IA…';
   const canvas=document.createElement('canvas');
   canvas.width=video.videoWidth||640; canvas.height=video.videoHeight||480;
   canvas.getContext('2d').drawImage(video,0,0);
-  const base64=canvas.toDataURL('image/jpeg',0.8);
+  const base64=canvas.toDataURL('image/jpeg',0.85);
+  // Leer género del selector del paso 2 de registro
+  const genderSel=document.getElementById('scan-gender-sel')||document.getElementById('reg-gender');
+  const gender=(genderSel&&genderSel.value&&genderSel.value!=='')?genderSel.value:'male';
   try{
-    const res=await fetch(BACKEND+'/yolo/analyze/general',{method:'POST',headers:AUTH.headers(),body:JSON.stringify({imageBase64:base64}),signal:AbortSignal.timeout(15000)});
-    if(!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data=await res.json();
-    if(data.personDetected===false){ lbl.textContent='No detecté persona. Intenta de nuevo.'; return; }
-    // Mostrar resultado
-    document.getElementById('sr-type').textContent=data.bodyTypeLabel||data.bodyType||'—';
-    document.getElementById('sr-bmi').textContent=data.estimatedBMIRange||'—';
-    document.getElementById('sr-goal').textContent=data.recommendedGoalLabel||'—';
-    document.getElementById('sr-activity').textContent=({sedentary:'Sedentario',light:'Ligero',moderate:'Moderado',active:'Activo',very_active:'Muy activo'})[data.recommendedActivity]||'—';
-    document.getElementById('sr-obs').textContent=data.observations||'';
-    document.getElementById('scan-result-card').style.display='block';
+    const res=await fetch(BACKEND+'/yolo/body-scan',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({imageBase64:base64,gender}),
+      signal:AbortSignal.timeout(20000)
+    });
+    const data=await res.json().catch(()=>({}));
+    if(!res.ok||data.personDetected===false){
+      lbl.textContent=data.error||'No detecté persona. Asegúrate de estar de frente, cuerpo completo visible.';
+      return;
+    }
+    // Mostrar tarjeta de resultado
+    const sr=document.getElementById('scan-result-card');
+    if(sr){
+      const setText=(id,v)=>{ const el=document.getElementById(id); if(el) el.textContent=v||'—'; };
+      setText('sr-type', data.bodyTypeLabel||data.bodyType);
+      setText('sr-bmi',  data.estimatedBMIRange+(data.estimatedBMI?' (IMC ~'+data.estimatedBMI+')':''));
+      setText('sr-bf',   data.estimatedBodyFat ? data.estimatedBodyFat+'% grasa estimada' : '');
+      setText('sr-goal', data.recommendedGoalLabel);
+      setText('sr-activity', data.recommendedActivityLabel||({sedentary:'Sedentario',light:'Ligero',moderate:'Moderado',active:'Activo',very_active:'Muy activo'})[data.recommendedActivity]);
+      setText('sr-obs',  data.observations);
+      sr.style.display='block';
+    }
+    // Pre-rellenar formulario de registro
     const goalSel=document.getElementById('reg-goal');
     const actSel=document.getElementById('reg-activity');
-    if(goalSel&&data.recommendedGoal) goalSel.value=data.recommendedGoal;
+    if(goalSel&&data.recommendedGoal)    goalSel.value=data.recommendedGoal;
     if(actSel&&data.recommendedActivity) actSel.value=data.recommendedActivity;
     closeScanModal();
     regGoStep(2);
-    document.getElementById('scan-open-btn').textContent='Re-escanear';
+    const openBtn=document.getElementById('scan-open-btn');
+    if(openBtn) openBtn.textContent='Re-escanear';
   }catch(e){
-    lbl.textContent='Análisis visual no disponible. Completa el formulario manualmente.';
+    lbl.textContent='Servicio de análisis no disponible. Completa el formulario manualmente.';
     console.warn('[scan]',e.message);
-    // Avanzar al formulario manual después de un momento
     setTimeout(()=>{ closeScanModal(); regGoStep(2); },2500);
   }
 }
@@ -1917,15 +1941,48 @@ async function _analyzeFood(){
         <button class="auth-btn" onclick="regNextStep()">Siguiente →</button>
       </div>
 
-      <!-- Paso 2: Escaneo corporal IA (próximamente) -->
+      <!-- Paso 2: Escaneo corporal IA -->
       <div id="reg-step-1" style="display:none;text-align:center;">
-        <div style="font-size:40px;margin-bottom:10px;">📸</div>
-        <div style="font-size:15px;font-weight:700;color:#fff;margin-bottom:6px;">Escaneo corporal IA</div>
-        <div style="font-size:12px;color:#ffffff55;margin-bottom:16px;line-height:1.5;background:#ffffff08;padding:12px;border-radius:10px;">
-          🚧 Función en desarrollo — próximamente podrás analizar tu complexión con la cámara.<br><br>
-          Continúa al siguiente paso para ingresar tus datos manualmente.
+        <div style="font-size:15px;font-weight:700;color:#fff;margin-bottom:4px;">Escaneo corporal IA</div>
+        <div style="font-size:11px;color:#ffffff55;margin-bottom:12px;">YOLOv8-pose · estimación antropométrica</div>
+
+        <!-- Selector de sexo (necesario para calibrar la estimación) -->
+        <div style="display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:14px;">
+          <span style="font-size:12px;color:#ffffffaa;">Sexo biológico:</span>
+          <select id="scan-gender-sel" style="background:#1e2a1e;border:1px solid #4DEB6E44;color:#fff;padding:4px 10px;border-radius:8px;font-size:12px;">
+            <option value="male">Masculino</option>
+            <option value="female">Femenino</option>
+            <option value="other">Otro</option>
+          </select>
         </div>
-        <button class="auth-btn" onclick="regNextStep()">Continuar →</button>
+
+        <!-- Instrucciones -->
+        <div style="font-size:11px;color:#ffffff55;margin-bottom:14px;line-height:1.6;background:#ffffff06;padding:10px 12px;border-radius:10px;text-align:left;">
+          • Párate a ~1.5 m de la cámara, cuerpo completo<br>
+          • Buena iluminación, fondo despejado<br>
+          • Ropa ajustada para mejor precisión
+        </div>
+
+        <!-- Botón abrir cámara -->
+        <button class="auth-btn" id="scan-open-btn" onclick="openScanModalReg()" style="margin-bottom:10px;">
+          📸 &nbsp;Escanear ahora
+        </button>
+
+        <!-- Resultado del escaneo -->
+        <div id="scan-result-card" style="display:none;background:#0d1f0d;border:1px solid #4DEB6E44;border-radius:12px;padding:14px;margin-bottom:12px;text-align:left;">
+          <div style="font-size:12px;font-weight:700;color:#4DEB6E;margin-bottom:10px;">Análisis completado</div>
+          <div class="scan-row"><span style="color:#ffffff88;font-size:11px;">Tipo corporal</span><span id="sr-type" style="font-size:12px;font-weight:700;color:#fff;"></span></div>
+          <div class="scan-row" style="margin-top:6px;"><span style="color:#ffffff88;font-size:11px;">IMC estimado</span><span id="sr-bmi" style="font-size:12px;font-weight:700;color:#fff;"></span></div>
+          <div class="scan-row" style="margin-top:6px;"><span style="color:#ffffff88;font-size:11px;">% Grasa estimada</span><span id="sr-bf" style="font-size:12px;font-weight:700;color:#4DEB6E;"></span></div>
+          <div class="scan-row" style="margin-top:6px;"><span style="color:#ffffff88;font-size:11px;">Objetivo sugerido</span><span id="sr-goal" style="font-size:12px;font-weight:700;color:#fff;"></span></div>
+          <div class="scan-row" style="margin-top:6px;"><span style="color:#ffffff88;font-size:11px;">Actividad sugerida</span><span id="sr-activity" style="font-size:12px;font-weight:700;color:#fff;"></span></div>
+          <div id="sr-obs" style="font-size:10px;color:#ffffff66;margin-top:10px;line-height:1.5;padding-top:8px;border-top:1px solid #ffffff11;"></div>
+        </div>
+
+        <div style="display:flex;gap:8px;">
+          <button class="auth-btn secondary" onclick="regNextStep()" style="flex:1;font-size:13px;">Saltar</button>
+          <button class="auth-btn" id="scan-continue-btn" onclick="regNextStep()" style="flex:2;">Continuar →</button>
+        </div>
       </div>
 
       <!-- Paso 3: Datos físicos -->
