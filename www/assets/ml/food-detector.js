@@ -59,7 +59,7 @@ class FoodDetector {
     }
 
     try {
-      const predictions = await this.model.estimateObjects(imageElement);
+      const predictions = await this.model.detect(imageElement);
 
       // Filtrar solo alimentos con confianza > 0.5
       const foodItems = predictions.filter(pred => {

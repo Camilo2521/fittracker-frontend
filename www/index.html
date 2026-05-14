@@ -870,9 +870,10 @@ async function sendForgotPassword(){
   if(!email) return _authError('Ingresa tu email');
   if(btn){btn.disabled=true;btn.textContent='Enviando...';}
   try{
-    const res=await fetch(BACKEND+'/auth/forgot-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email}),signal:AbortSignal.timeout(8000)});
-    const data=await res.json().catch(()=>({}));
-    _authError(data.message||'Si ese email está registrado, recibirás un enlace en breve');
+    const data=window.SYNC
+      ? await SYNC.forgotPassword(email)
+      : await fetch(BACKEND+'/auth/forgot-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email}),signal:AbortSignal.timeout(8000)}).then(r=>r.json()).catch(()=>({}));
+    _authError((data&&data.message)||'Si ese email está registrado, recibirás un enlace en breve');
   }catch{ _authError('No se pudo conectar al servidor'); }
   finally{ if(btn){btn.disabled=false;btn.textContent='Enviar enlace';} }
 }
@@ -914,20 +915,21 @@ async function submitResetPassword() {
 
   if (btn) { btn.disabled = true; btn.textContent = 'Guardando...'; }
   try {
-    const res = await fetch(BACKEND + '/auth/reset-password', {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ token: _resetToken, password }),
-      signal:  AbortSignal.timeout(8000),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) return _authError(data.error || 'No se pudo restablecer la contraseña');
-    // Éxito: limpiar estado y volver al login con mensaje de confirmación
+    if (window.SYNC) {
+      await SYNC.resetPassword(_resetToken, password);
+    } else {
+      const res = await fetch(BACKEND + '/auth/reset-password', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: _resetToken, password }), signal: AbortSignal.timeout(8000),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) return _authError(data.error || 'No se pudo restablecer la contraseña');
+    }
     hideResetPassword(null);
     _authError('✓ Contraseña actualizada. Inicia sesión con tu nueva contraseña.');
     document.getElementById('auth-error').style.color = '#4DEB6E';
-  } catch {
-    _authError('No se pudo conectar al servidor');
+  } catch (err) {
+    _authError(err.message || 'No se pudo conectar al servidor');
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = 'Guardar contraseña'; }
   }
@@ -1081,7 +1083,8 @@ async function captureAndAnalyze(){
   canvas.getContext('2d').drawImage(video,0,0);
   const base64=canvas.toDataURL('image/jpeg',0.8);
   try{
-    const res=await fetch(BACKEND+'/ai/body-scan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({imageBase64:base64}),signal:AbortSignal.timeout(15000)});
+    const res=await fetch(BACKEND+'/yolo/analyze/general',{method:'POST',headers:AUTH.headers(),body:JSON.stringify({imageBase64:base64}),signal:AbortSignal.timeout(15000)});
+    if(!res.ok) throw new Error(`HTTP ${res.status}`);
     const data=await res.json();
     if(data.personDetected===false){ lbl.textContent='No detecté persona. Intenta de nuevo.'; return; }
     // Mostrar resultado
@@ -1091,18 +1094,18 @@ async function captureAndAnalyze(){
     document.getElementById('sr-activity').textContent=({sedentary:'Sedentario',light:'Ligero',moderate:'Moderado',active:'Activo',very_active:'Muy activo'})[data.recommendedActivity]||'—';
     document.getElementById('sr-obs').textContent=data.observations||'';
     document.getElementById('scan-result-card').style.display='block';
-    // Pre-llenar formulario paso 3
     const goalSel=document.getElementById('reg-goal');
     const actSel=document.getElementById('reg-activity');
     if(goalSel&&data.recommendedGoal) goalSel.value=data.recommendedGoal;
     if(actSel&&data.recommendedActivity) actSel.value=data.recommendedActivity;
     closeScanModal();
-    // Ir a paso 3 automáticamente
     regGoStep(2);
     document.getElementById('scan-open-btn').textContent='Re-escanear';
   }catch(e){
-    lbl.textContent='Error al analizar. Intenta de nuevo.';
-    console.error('[scan]',e);
+    lbl.textContent='Análisis visual no disponible. Completa el formulario manualmente.';
+    console.warn('[scan]',e.message);
+    // Avanzar al formulario manual después de un momento
+    setTimeout(()=>{ closeScanModal(); regGoStep(2); },2500);
   }
 }
 
@@ -1717,12 +1720,34 @@ async function _analyzeFood(){
   const canvas=document.createElement('canvas');
   canvas.width=video.videoWidth||640; canvas.height=video.videoHeight||480;
   canvas.getContext('2d').drawImage(video,0,0);
-  const base64=canvas.toDataURL('image/jpeg',0.8);
   try{
-    const res=await fetch(BACKEND+'/ai/body-scan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({imageBase64:base64}),signal:AbortSignal.timeout(15000)});
-    info.textContent='¡Plato analizado! Revisa el chat para los detalles.';
-    setTimeout(()=>closeCameraModal(),2000);
-    if(typeof showToast==='function') showToast('Plato analizado — pregunta a FitBot sobre este plato');
+    if(!window.FoodDetector) throw new Error('Detector de alimentos no cargado');
+    const result=await window.FoodDetector.detectFood(canvas);
+    if(!result.items.length){
+      info.textContent='No se detectaron alimentos. Acerca más el plato.';
+      return;
+    }
+    const names=result.items.map(i=>i.name).join(', ');
+    const kcal=Math.round(result.totalCalories);
+    info.textContent=`${names} · ~${kcal} kcal detectadas`;
+    await window.FoodDetector.saveMealAnalysis(result);
+    if(typeof showToast==='function') showToast(`Detectado: ${names} (~${kcal} kcal)`);
+    // Populate result panel in the IA page
+    const fr=document.getElementById('food-result');
+    if(fr){
+      document.getElementById('food-items').textContent=names;
+      document.getElementById('food-calories').textContent=kcal+' kcal';
+      document.getElementById('food-protein').textContent=Math.round(result.totalProtein)+'g';
+      document.getElementById('food-carbs').textContent=Math.round(result.totalCarbs)+'g';
+      document.getElementById('food-fat').textContent=Math.round(result.totalFat)+'g';
+      const recHtml=result.recommendations.map(r=>{
+        const icon=r.type==='positive'?'✅':r.type==='warning'?'⚠️':'💡';
+        return icon+' '+r.message;
+      }).join('<br>');
+      document.getElementById('food-recommendations').innerHTML=recHtml||'Sin recomendaciones adicionales';
+      fr.style.display='block';
+    }
+    setTimeout(()=>closeCameraModal(),3000);
   }catch(e){ info.textContent='Error al analizar: '+e.message; }
 }
 </script>
@@ -2329,6 +2354,11 @@ async function _analyzeFood(){
       </div>
     </div>
 
+    <div class="card" id="rep-sessions-card" style="display:none;">
+      <div class="card-title">Sesiones de repeticiones</div>
+      <div id="rep-sessions-list" style="font-size:13px;color:var(--text3);">Sin sesiones registradas</div>
+    </div>
+
     <div class="card">
       <div class="card-title">Notificaciones</div>
       <p style="font-size:12px;color:var(--text3);margin:0 0 12px;">Recordatorios de agua, motivación diaria y alertas de racha.</p>
@@ -2437,6 +2467,12 @@ async function _analyzeFood(){
           <div id="exercise-feedback" style="margin-top:8px;font-size:12px;color:var(--text2);"></div>
         </div>
       </div>
+    </div>
+
+    <!-- ── Configuración guardada ── -->
+    <div class="card" id="settings-manager-card" style="display:none;">
+      <div class="card-title">Configuración guardada</div>
+      <div id="settings-list"></div>
     </div>
 
     <!-- ── Estado del sistema ── -->
@@ -2795,8 +2831,8 @@ function goPage(id, btn) {
   document.querySelector('.scroll-area').scrollTop = 0;
   if (id === 'peso')  renderWeightChart();
   if (id === 'nutri') { renderPlateChart(); loadPersonalizedNutrition(); }
-  if (id === 'reportes') { renderWeeklyChart(); updateWeeklyStats(); loadGoalSettings(); loadPersonalizedTraining(); _updateNotifBtn(); _syncFromBackend().then(() => { renderWeeklyChart(); updateWeeklyStats(); }).catch(() => {}); }
-  if (id === 'ia') { _ensureChatInit(); }
+  if (id === 'reportes') { renderWeeklyChart(); updateWeeklyStats(); loadGoalSettings(); loadPersonalizedTraining(); loadRepSessions(); _updateNotifBtn(); _syncFromBackend().then(() => { renderWeeklyChart(); updateWeeklyStats(); }).catch(() => {}); }
+  if (id === 'ia') { _ensureChatInit(); loadSettingsManager(); }
 }
 
 // ── DASHBOARD ──────────────────────────────────────────────────────────────
@@ -3335,6 +3371,74 @@ async function loadPersonalizedTraining() {
   }
 }
 
+// ── REP SESSIONS HISTORY ────────────────────────────────────────────────────
+async function loadRepSessions() {
+  if (!window.SYNC || !SYNC.isAuthenticated) return;
+  const card = document.getElementById('rep-sessions-card');
+  const list = document.getElementById('rep-sessions-list');
+  if (!card || !list) return;
+  try {
+    const result = await SYNC.getRepSessions(10, 0);
+    const sessions = result?.data || [];
+    if (!sessions.length) return;
+    card.style.display = 'block';
+    list.innerHTML = sessions.map(s => {
+      const date = s.creado_en
+        ? new Date(s.creado_en).toLocaleDateString('es-CO', { day: '2-digit', month: 'short' })
+        : '—';
+      const reps = s.reps != null ? s.reps + ' reps' : '—';
+      const dur  = s.duracion_seg ? Math.round(s.duracion_seg / 60) + ' min' : '';
+      return `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);">
+        <div>
+          <div style="font-weight:600;font-size:13px;">${s.ejercicio_tipo || '—'}</div>
+          <div style="font-size:11px;color:var(--text3);">${date}</div>
+        </div>
+        <div style="text-align:right;">
+          <div style="font-weight:700;color:var(--blue);font-size:13px;">${reps}</div>
+          ${dur ? `<div style="font-size:11px;color:var(--text3);">${dur}</div>` : ''}
+        </div>
+      </div>`;
+    }).join('');
+  } catch (e) {
+    console.warn('[reps]', e.message);
+  }
+}
+
+// ── SETTINGS MANAGER ────────────────────────────────────────────────────────
+async function loadSettingsManager() {
+  if (!window.SYNC || !SYNC.isAuthenticated) return;
+  const card = document.getElementById('settings-manager-card');
+  const list = document.getElementById('settings-list');
+  if (!card || !list) return;
+  try {
+    const result = await SYNC.getSettings();
+    if (!result || !Object.keys(result).length) { card.style.display = 'none'; return; }
+    card.style.display = 'block';
+    list.innerHTML = Object.entries(result).map(([k, v]) => `
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--border);">
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:12px;font-weight:600;">${k}</div>
+          <div style="font-size:11px;color:var(--text3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${String(v).slice(0,60)}</div>
+        </div>
+        <button onclick="deleteSavedSetting('${k.replace(/\\/g,'\\\\').replace(/'/g,'\\'')}')"
+          style="background:#ff444418;border:1px solid #ff444433;border-radius:8px;padding:4px 10px;font-size:11px;color:#ff4444;cursor:pointer;flex-shrink:0;margin-left:8px;">✕</button>
+      </div>`).join('');
+  } catch (e) {
+    console.warn('[settings]', e.message);
+  }
+}
+
+async function deleteSavedSetting(key) {
+  if (!window.SYNC) return;
+  try {
+    await SYNC.deleteSetting(key);
+    showToast(`Clave '${key}' eliminada`);
+    await loadSettingsManager();
+  } catch {
+    showToast('No se pudo eliminar la configuración');
+  }
+}
+
 // ── NOTIFICATIONS INTEGRATION ───────────────────────────────────────────────
 async function setupNotifications() {
   if (typeof NOTIFICATIONS === 'undefined' || !NOTIFICATIONS?.requestPermission) return;
@@ -3395,19 +3499,15 @@ async function _onAuthSuccess() {
 
   // Load chat history for FitBot
   try {
-    const hRes = await fetch(`${BACKEND}/auth/chat-history?limit=60`, { headers: AUTH.headers(), signal: AbortSignal.timeout(4000) });
-    if (hRes.ok) {
-      const result = await hRes.json();
-      const rows   = result.data || (Array.isArray(result) ? result : []);
-      if (rows.length) {
-        _chat.history = rows.map(r => ({ role: r.rol || r.role, content: r.contenido || r.content }));
-        _chat.greeted = true;
-        // Render existing messages in the chat UI
-        const box = document.getElementById('chat-messages');
-        if (box && box.children.length === 0) {
-          for (const m of _chat.history.slice(-40)) {
-            _appendMessage(m.role, m.content);
-          }
+    const result = window.SYNC ? await SYNC.getChatHistory(60) : null;
+    const rows   = result?.data || (Array.isArray(result) ? result : []);
+    if (rows.length) {
+      _chat.history = rows.map(r => ({ role: r.rol || r.role, content: r.contenido || r.content }));
+      _chat.greeted = true;
+      const box = document.getElementById('chat-messages');
+      if (box && box.children.length === 0) {
+        for (const m of _chat.history.slice(-40)) {
+          _appendMessage(m.role, m.content);
         }
       }
     }
@@ -3444,14 +3544,8 @@ async function _onAuthSuccess() {
 // ── Logout ────────────────────────────────────────────────────────────────────
 async function authLogout() {
   // Save chat history before logout
-  if (_chat.history.length > 1) {
-    try {
-      await fetch(`${BACKEND}/auth/chat-history`, {
-        method: 'POST', headers: AUTH.headers(),
-        body: JSON.stringify({ messages: _chat.history.slice(-30) }),
-        signal: AbortSignal.timeout(4000),
-      });
-    } catch {}
+  if (_chat.history.length > 1 && window.SYNC) {
+    await SYNC.saveChatHistory(_chat.history.slice(-30)).catch(() => {});
   }
   _chat.history = []; _chat.greeted = false; _chat.dietPlan = null;
   if (window.SYNC) await SYNC.logout().catch(() => {});
@@ -3565,12 +3659,13 @@ async function saveProfileEdit() {
 }
 
 // ── Save chat on visibility change ────────────────────────────────────────────
+// Uses keepalive:true so the request survives page hide/unload (SYNC doesn't support keepalive)
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden' && AUTH.token && _chat.history.length > 1) {
     fetch(`${BACKEND}/auth/chat-history`, {
-      method: 'POST',
-      headers: AUTH.headers(),
-      body: JSON.stringify({ messages: _chat.history.slice(-20) }),
+      method:    'POST',
+      headers:   AUTH.headers(),
+      body:      JSON.stringify({ messages: _chat.history.slice(-20) }),
       keepalive: true,
     }).catch(() => {});
   }
@@ -3740,9 +3835,14 @@ async function stopExerciseAnalysis() {
 
 // Progress analysis function
 async function analyzeProgress() {
+  if (!window.VisionService) {
+    if (typeof openScanModal === 'function') openScanModal();
+    else showToast('Análisis corporal no disponible. Usa el escáner corporal en el registro.');
+    return;
+  }
   try {
     showToast('Abriendo cámara para análisis corporal...');
-    
+
     const result = await window.VisionService.startCameraAnalysis('progress');
     
     if (result) {
@@ -4183,12 +4283,8 @@ async function sendChatMessage() {
     _chat.history.push({ role: 'assistant', content: fullResponse });
 
     // Auto-save every 4 messages (2 intercambios) para persistir la memoria
-    if (AUTH.token && _chat.history.length % 4 === 0) {
-      fetch(`${BACKEND}/auth/chat-history`, {
-        method: 'POST', headers: AUTH.headers(),
-        body: JSON.stringify({ messages: _chat.history.slice(-40) }),
-        keepalive: true,
-      }).catch(() => {});
+    if (AUTH.token && _chat.history.length % 4 === 0 && window.SYNC) {
+      SYNC.saveChatHistory(_chat.history.slice(-40)).catch(() => {});
     }
 
   } catch (err) {

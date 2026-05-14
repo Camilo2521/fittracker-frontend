@@ -431,6 +431,66 @@ class BackendSync {
     return result || { data: [], total: 0, limit, offset };
   }
 
+  // ── CONFIGURACIÓN (DELETE) ───────────────────────────────────
+
+  deleteSetting(key) {
+    return this._authDelete(`/api/v1/settings/${encodeURIComponent(key)}`);
+  }
+
+  // ── REPS (listado) ───────────────────────────────────────────
+
+  getRepSessions(limit = 20, offset = 0) {
+    return this._authGet(`/api/v1/reps/sessions?limit=${limit}&offset=${offset}`);
+  }
+
+  // ── YOLO ─────────────────────────────────────────────────────
+
+  getYoloSummary() { return this._authGet('/api/v1/yolo/summary'); }
+  clearYoloSession() { return this._authDelete('/api/v1/yolo/session'); }
+
+  // ── PERFIL ────────────────────────────────────────────────────
+
+  getProfile() { return this._authGet('/api/v1/auth/me'); }
+
+  // ── HISTORIAL DE CHAT ─────────────────────────────────────────
+
+  getChatHistory(limit = 60) {
+    return this._authGet(`/api/v1/auth/chat-history?limit=${limit}`);
+  }
+
+  saveChatHistory(messages) {
+    if (!messages?.length) return Promise.resolve(null);
+    return this._authPost('/api/v1/auth/chat-history', { messages });
+  }
+
+  // ── AUTH PÚBLICO (sin token) ──────────────────────────────────
+
+  async forgotPassword(email) {
+    try {
+      const res = await fetch(`${this.baseUrl}/api/v1/auth/forgot-password`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ email }),
+        signal:  AbortSignal.timeout(8000),
+      });
+      return await res.json().catch(() => ({}));
+    } catch {
+      return null;
+    }
+  }
+
+  async resetPassword(token, password) {
+    const res = await fetch(`${this.baseUrl}/api/v1/auth/reset-password`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ token, password }),
+      signal:  AbortSignal.timeout(8000),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'No se pudo restablecer la contraseña');
+    return data;
+  }
+
   // ── UTILIDADES ───────────────────────────────────────────────
 
   async isAvailable() {
