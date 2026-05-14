@@ -2354,6 +2354,36 @@ async function _analyzeFood(){
       </div>
     </div>
 
+    <!-- ── Predicción IA ────────────────────────────────────── -->
+    <div class="card" id="forecast-card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+        <div class="card-title" style="margin:0;">Predicción de peso IA</div>
+        <button onclick="loadForecast()" id="forecast-refresh-btn"
+          style="background:none;border:1px solid var(--border);border-radius:8px;padding:4px 10px;font-size:11px;color:var(--text2);cursor:pointer;">
+          Actualizar
+        </button>
+      </div>
+      <div id="forecast-loading" style="font-size:13px;color:var(--text3);padding:8px 0;display:none;">
+        Calculando predicción…
+      </div>
+      <div id="forecast-error" style="font-size:12px;color:#ff6b6b;padding:6px 0;display:none;"></div>
+      <div id="forecast-content" style="display:none;">
+        <!-- Modelo info -->
+        <div id="forecast-meta" style="font-size:11px;color:var(--text3);margin-bottom:10px;"></div>
+        <!-- Gráfico SVG inline -->
+        <div id="forecast-chart-wrap" style="width:100%;overflow-x:auto;margin-bottom:12px;">
+          <svg id="forecast-svg" viewBox="0 0 340 130" style="width:100%;max-width:340px;display:block;margin:0 auto;" aria-label="Gráfico de predicción de peso"></svg>
+        </div>
+        <!-- Tabla de hitos -->
+        <div id="forecast-table" style="display:grid;grid-template-columns:repeat(5,1fr);gap:4px;text-align:center;margin-bottom:10px;"></div>
+        <!-- Insights -->
+        <div id="forecast-insights" style="font-size:12px;color:var(--text2);border-top:1px solid var(--border);padding-top:8px;"></div>
+      </div>
+      <div id="forecast-placeholder" style="font-size:12px;color:var(--text3);padding:6px 0;">
+        Carga la página de Reportes para ver tu predicción personalizada.
+      </div>
+    </div>
+
     <div class="card" id="rep-sessions-card" style="display:none;">
       <div class="card-title">Sesiones de repeticiones</div>
       <div id="rep-sessions-list" style="font-size:13px;color:var(--text3);">Sin sesiones registradas</div>
@@ -2831,7 +2861,7 @@ function goPage(id, btn) {
   document.querySelector('.scroll-area').scrollTop = 0;
   if (id === 'peso')  renderWeightChart();
   if (id === 'nutri') { renderPlateChart(); loadPersonalizedNutrition(); }
-  if (id === 'reportes') { renderWeeklyChart(); updateWeeklyStats(); loadGoalSettings(); loadPersonalizedTraining(); loadRepSessions(); _updateNotifBtn(); _syncFromBackend().then(() => { renderWeeklyChart(); updateWeeklyStats(); }).catch(() => {}); }
+  if (id === 'reportes') { renderWeeklyChart(); updateWeeklyStats(); loadGoalSettings(); loadPersonalizedTraining(); loadRepSessions(); loadForecast(); _updateNotifBtn(); _syncFromBackend().then(() => { renderWeeklyChart(); updateWeeklyStats(); }).catch(() => {}); }
   if (id === 'ia') { _ensureChatInit(); loadSettingsManager(); }
 }
 
@@ -3404,6 +3434,153 @@ async function loadRepSessions() {
   }
 }
 
+// ── FORECAST (ProgressNet) ───────────────────────────────────────────────────
+async function loadForecast() {
+  if (!window.SYNC || !SYNC.isAuthenticated) return;
+  const loading = document.getElementById('forecast-loading');
+  const errEl   = document.getElementById('forecast-error');
+  const content = document.getElementById('forecast-content');
+  const placeholder = document.getElementById('forecast-placeholder');
+  if (!loading) return;
+
+  loading.style.display = 'block';
+  if (errEl)       errEl.style.display = 'none';
+  if (content)     content.style.display = 'none';
+  if (placeholder) placeholder.style.display = 'none';
+
+  try {
+    const res = await SYNC.getForecast();
+    if (!res || res.error) throw new Error(res?.error || 'Sin respuesta del servidor');
+
+    loading.style.display = 'none';
+    content.style.display = 'block';
+
+    const f = res;
+    const modelLabel = { neural: '🧠 Red neuronal', physics: '⚡ Modelo físico', hybrid: '🔬 Híbrido' };
+
+    // Meta info
+    const meta = document.getElementById('forecast-meta');
+    if (meta) {
+      const trendEmoji = f.trend === 'losing' ? '📉' : f.trend === 'gaining' ? '📈' : '➡️';
+      const etaTxt = f.goal_eta_days != null
+        ? ` · Meta en ~${f.goal_eta_days} días` : '';
+      meta.innerHTML =
+        `${modelLabel[f.model_type] || f.model_type} · ${f.data_points} registros · `+
+        `${trendEmoji} ${(f.weekly_rate > 0 ? '+' : '') + f.weekly_rate} kg/sem${etaTxt}`;
+    }
+
+    // Gráfico SVG
+    _renderForecastSvg(f.current_weight, f.predictions);
+
+    // Tabla de hitos
+    const table = document.getElementById('forecast-table');
+    if (table) {
+      table.innerHTML = f.predictions.map(p => {
+        const delta = (p.weight - f.current_weight).toFixed(1);
+        const sign  = delta > 0 ? '+' : '';
+        const color = p.weight < f.current_weight ? 'var(--green-d)'
+                    : p.weight > f.current_weight ? '#ff8800' : 'var(--text1)';
+        return `<div style="background:var(--card2,#1e1e2e);border-radius:8px;padding:6px 2px;">
+          <div style="font-size:10px;color:var(--text3);">${p.days}d</div>
+          <div style="font-weight:700;font-size:13px;color:${color};">${p.weight}</div>
+          <div style="font-size:10px;color:var(--text3);">${sign}${delta}</div>
+          <div style="font-size:9px;color:var(--text3);">${Math.round(p.confidence*100)}%</div>
+        </div>`;
+      }).join('');
+    }
+
+    // Insights
+    const ins = document.getElementById('forecast-insights');
+    if (ins && f.insights?.length) {
+      ins.innerHTML = f.insights
+        .map(i => `<div style="padding:3px 0;line-height:1.4;">• ${i}</div>`)
+        .join('');
+    }
+
+  } catch (e) {
+    loading.style.display = 'none';
+    if (errEl) { errEl.textContent = 'No se pudo cargar la predicción: ' + e.message; errEl.style.display = 'block'; }
+    if (placeholder) placeholder.style.display = 'block';
+    console.warn('[forecast]', e.message);
+  }
+}
+
+function _renderForecastSvg(currentWeight, predictions) {
+  const svg = document.getElementById('forecast-svg');
+  if (!svg) return;
+
+  const W = 340, H = 130, padL = 36, padR = 10, padT = 12, padB = 24;
+  const plotW = W - padL - padR;
+  const plotH = H - padT - padB;
+
+  // Datos: punto actual + predicciones
+  const allWeights = [currentWeight, ...predictions.map(p => p.weight)];
+  const allLower   = [currentWeight, ...predictions.map(p => p.lower)];
+  const allUpper   = [currentWeight, ...predictions.map(p => p.upper)];
+  const allDays    = [0, ...predictions.map(p => p.days)];
+  const maxDay     = allDays[allDays.length - 1];
+
+  const minW = Math.min(...allLower) - 0.5;
+  const maxW = Math.max(...allUpper) + 0.5;
+  const wRange = maxW - minW || 1;
+
+  const xScale = d => padL + (d / maxDay) * plotW;
+  const yScale = w => padT + (1 - (w - minW) / wRange) * plotH;
+
+  // Generar paths
+  const pts    = allDays.map((d, i) => [xScale(d), yScale(allWeights[i])]);
+  const upPts  = allDays.map((d, i) => [xScale(d), yScale(allUpper[i])]);
+  const loPts  = allDays.map((d, i) => [xScale(d), yScale(allLower[i])]);
+
+  const polyline = (arr, cls) =>
+    `<polyline points="${arr.map(p => p.join(',')).join(' ')}" class="${cls}" fill="none"/>`;
+
+  // Banda de confianza (polígono)
+  const bandPts = [...upPts, ...[...loPts].reverse()]
+    .map(p => p.join(',')).join(' ');
+
+  // Líneas de referencia del eje Y
+  const yStep  = wRange / 4;
+  const yLines = Array.from({ length: 5 }, (_, i) => minW + i * yStep);
+
+  const ns = 'http://www.w3.org/2000/svg';
+  let html = `
+    <style>
+      #forecast-svg .grid { stroke: var(--border,#333); stroke-width: 0.5; }
+      #forecast-svg .band { fill: var(--blue,#3b82f6); opacity: 0.12; }
+      #forecast-svg .line { stroke: var(--blue,#3b82f6); stroke-width: 2; stroke-linejoin: round; }
+      #forecast-svg .dot  { fill: var(--blue,#3b82f6); }
+      #forecast-svg .dot0 { fill: var(--green-d,#4ade80); }
+      #forecast-svg text  { font-family: inherit; fill: var(--text3,#888); }
+    </style>`;
+
+  // Grid lines Y
+  yLines.forEach(w => {
+    const y = yScale(w);
+    html += `<line x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}" class="grid"/>`;
+    html += `<text x="${padL - 3}" y="${y + 3.5}" text-anchor="end" font-size="8">${w.toFixed(1)}</text>`;
+  });
+
+  // Eje X labels
+  predictions.forEach(p => {
+    const x = xScale(p.days);
+    html += `<text x="${x}" y="${H - 4}" text-anchor="middle" font-size="8">${p.days}d</text>`;
+  });
+
+  // Banda
+  html += `<polygon points="${bandPts}" class="band"/>`;
+
+  // Línea principal
+  html += `<polyline points="${pts.map(p => p.join(',')).join(' ')}" class="line" fill="none"/>`;
+
+  // Puntos
+  pts.forEach(([x, y], i) => {
+    html += `<circle cx="${x}" cy="${y}" r="${i === 0 ? 4 : 3}" class="${i === 0 ? 'dot0' : 'dot'}"/>`;
+  });
+
+  svg.innerHTML = html;
+}
+
 // ── SETTINGS MANAGER ────────────────────────────────────────────────────────
 async function loadSettingsManager() {
   if (!window.SYNC || !SYNC.isAuthenticated) return;
@@ -3420,7 +3597,7 @@ async function loadSettingsManager() {
           <div style="font-size:12px;font-weight:600;">${k}</div>
           <div style="font-size:11px;color:var(--text3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${String(v).slice(0,60)}</div>
         </div>
-        <button onclick="deleteSavedSetting('${k.replace(/\\/g,'\\\\').replace(/'/g,'\\'')}')"
+        <button onclick="deleteSavedSetting('${k.replace(/\\/g,'\\\\').replace(/'/g,"\\'")}')"
           style="background:#ff444418;border:1px solid #ff444433;border-radius:8px;padding:4px 10px;font-size:11px;color:#ff4444;cursor:pointer;flex-shrink:0;margin-left:8px;">✕</button>
       </div>`).join('');
   } catch (e) {

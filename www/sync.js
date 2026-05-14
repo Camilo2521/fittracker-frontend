@@ -448,6 +448,9 @@ class BackendSync {
   getYoloSummary() { return this._authGet('/api/v1/yolo/summary'); }
   clearYoloSession() { return this._authDelete('/api/v1/yolo/session'); }
 
+  // ── Predictor neuronal ────────────────────────────────────────
+  getForecast() { return this._authGet('/api/v1/progress/forecast'); }
+
   // ── PERFIL ────────────────────────────────────────────────────
 
   getProfile() { return this._authGet('/api/v1/auth/me'); }
