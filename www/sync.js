@@ -15,6 +15,8 @@
  *   await SYNC.calculateMetrics(userId);    // espera respuesta Phase 4
  */
 
+const MAX_RETRY_ATTEMPTS = 3;
+
 class BackendSync {
   constructor() {
     this._baseUrl        = null;
@@ -171,7 +173,7 @@ class BackendSync {
   }
 
   _enqueue(method, path, body) {
-    this._queue.push({ method, path, body });
+    this._queue.push({ method, path, body, retries: 0 });
     this._saveQueue();
   }
 
@@ -182,6 +184,7 @@ class BackendSync {
     this._saveQueue();
 
     for (const op of pending) {
+      if ((op.retries || 0) >= MAX_RETRY_ATTEMPTS) continue; // permanently failed, drop
       try {
         const opts = {
           method:  op.method,
@@ -191,8 +194,7 @@ class BackendSync {
         if (op.body !== undefined) opts.body = JSON.stringify(op.body);
         await fetch(`${this.baseUrl}${op.path}`, opts);
       } catch {
-        // Si falla de nuevo, re-encolar (sin bucle infinito: máx intentos no implementados)
-        this._queue.push(op);
+        this._queue.push({ ...op, retries: (op.retries || 0) + 1 });
       }
     }
     this._saveQueue();
@@ -307,8 +309,6 @@ class BackendSync {
       notes:     data.notes  || null,
     });
   }
-
-  syncMeal()     { return Promise.resolve(null); }
 
   syncCheck(checks, date) {
     if (!checks) return Promise.resolve(null);

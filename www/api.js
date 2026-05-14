@@ -327,6 +327,34 @@ class FitTrackerAPI {
     await DB.importData(importData.data);
   }
 
+  // ── DATA WIPE ────────────────────────────────────────────────
+  /**
+   * Borra todos los datos del usuario de IndexedDB y las claves de
+   * localStorage que usa el fallback. Llamar antes de location.reload()
+   * en el flujo de eliminación de cuenta.
+   */
+  async clearAll() {
+    await DB.ready;
+
+    // Vaciar cada object store de IndexedDB
+    await Promise.all(
+      Object.values(STORES).map(storeName => DB.clear(storeName).catch(() => {}))
+    );
+
+    // Eliminar las claves de fallback que el Database manager escribe
+    // con el patrón "<storeName>_<timestamp|id>"
+    const prefixes = Object.values(STORES);
+    const toRemove = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && prefixes.some(p => key.startsWith(p + '_'))) toRemove.push(key);
+    }
+    toRemove.forEach(k => localStorage.removeItem(k));
+
+    // Resetear estado interno de la instancia
+    this.initialized = false;
+  }
+
   // ── UTILITIES ───────────────────────────────────────────────
   _today() {
     return new Date().toISOString().split('T')[0];

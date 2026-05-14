@@ -616,6 +616,7 @@ body {
 .auth-btn:active { transform: scale(.97); }
 .auth-btn:disabled { opacity: .5; cursor: default; }
 .auth-btn.secondary { background: transparent; color: #4DEB6E; border: 1.5px solid #4DEB6E30; font-size: 13px; padding: 10px; }
+.auth-btn.danger { background: transparent; color: #ff6b6b; border: 1.5px solid #ff6b6b30; font-size: 13px; padding: 10px; margin-top: 16px; }
 .auth-error {
   background: #3d1010; border: 1px solid #8b202044; border-radius: 8px;
   padding: 9px 12px; color: #ff6b6b; font-size: 13px; margin-bottom: 12px; display: none;
@@ -844,6 +845,130 @@ async function authLogin(){
     await _onAuthSuccess();
   }catch{ _authError('No se pudo conectar al servidor. ¿Está corriendo el backend?'); }
   finally{ if(btn){btn.disabled=false;btn.textContent='Entrar';} }
+}
+
+function showForgotPassword(e){
+  e.preventDefault();
+  document.getElementById('auth-login').classList.remove('active');
+  document.getElementById('auth-forgot').classList.add('active');
+  const loginEmail=document.getElementById('login-email')?.value||'';
+  const forgotInput=document.getElementById('forgot-email');
+  if(forgotInput&&loginEmail) forgotInput.value=loginEmail;
+  const err=document.getElementById('auth-error'); if(err) err.style.display='none';
+}
+
+function hideForgotPassword(e){
+  e.preventDefault();
+  document.getElementById('auth-forgot').classList.remove('active');
+  document.getElementById('auth-login').classList.add('active');
+  const err=document.getElementById('auth-error'); if(err) err.style.display='none';
+}
+
+async function sendForgotPassword(){
+  const email=document.getElementById('forgot-email')?.value.trim();
+  const btn=document.getElementById('forgot-btn');
+  if(!email) return _authError('Ingresa tu email');
+  if(btn){btn.disabled=true;btn.textContent='Enviando...';}
+  try{
+    const res=await fetch(BACKEND+'/auth/forgot-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email}),signal:AbortSignal.timeout(8000)});
+    const data=await res.json().catch(()=>({}));
+    _authError(data.message||'Si ese email está registrado, recibirás un enlace en breve');
+  }catch{ _authError('No se pudo conectar al servidor'); }
+  finally{ if(btn){btn.disabled=false;btn.textContent='Enviar enlace';} }
+}
+
+// ── Reset Password ────────────────────────────────────────────────────────────
+
+let _resetToken = null;
+
+function showResetPassword(token) {
+  _resetToken = token;
+  document.querySelectorAll('.auth-section').forEach(s => s.classList.remove('active'));
+  document.getElementById('auth-reset').classList.add('active');
+  document.getElementById('reset-password').value = '';
+  document.getElementById('reset-password-confirm').value = '';
+  const err = document.getElementById('auth-error'); if (err) err.style.display = 'none';
+}
+
+function hideResetPassword(e) {
+  if (e) e.preventDefault();
+  _resetToken = null;
+  document.getElementById('auth-reset').classList.remove('active');
+  document.getElementById('auth-login').classList.add('active');
+  // Limpiar el token de la URL sin recargar la página
+  const url = new URL(window.location.href);
+  url.searchParams.delete('token');
+  url.searchParams.delete('action');
+  window.history.replaceState({}, '', url.pathname);
+  const err = document.getElementById('auth-error'); if (err) err.style.display = 'none';
+}
+
+async function submitResetPassword() {
+  const password = document.getElementById('reset-password')?.value;
+  const confirm  = document.getElementById('reset-password-confirm')?.value;
+  const btn      = document.getElementById('reset-btn');
+
+  if (!password || password.length < 8) return _authError('La contraseña debe tener al menos 8 caracteres');
+  if (password !== confirm)             return _authError('Las contraseñas no coinciden');
+  if (!_resetToken)                     return _authError('Token inválido. Solicita un nuevo enlace de recuperación');
+
+  if (btn) { btn.disabled = true; btn.textContent = 'Guardando...'; }
+  try {
+    const res = await fetch(BACKEND + '/auth/reset-password', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ token: _resetToken, password }),
+      signal:  AbortSignal.timeout(8000),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return _authError(data.error || 'No se pudo restablecer la contraseña');
+    // Éxito: limpiar estado y volver al login con mensaje de confirmación
+    hideResetPassword(null);
+    _authError('✓ Contraseña actualizada. Inicia sesión con tu nueva contraseña.');
+    document.getElementById('auth-error').style.color = '#4DEB6E';
+  } catch {
+    _authError('No se pudo conectar al servidor');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Guardar contraseña'; }
+  }
+}
+
+/**
+ * Detecta si la URL contiene ?token= (enlace de reset enviado por email)
+ * y muestra automáticamente el formulario de nueva contraseña.
+ * Se llama una vez al cargar la página, antes de mostrar el panel de auth.
+ */
+function _checkPasswordResetToken() {
+  const params = new URLSearchParams(window.location.search);
+  const token  = params.get('token');
+  const action = params.get('action');
+  if (token && (action === 'reset-password' || !action)) {
+    showResetPassword(token);
+    return true;
+  }
+  return false;
+}
+
+async function deleteAccountFlow(){
+  const first=confirm('¿Estás seguro de que quieres eliminar tu cuenta?\n\nSe borrarán todos tus datos permanentemente. Esta acción no se puede deshacer.');
+  if(!first) return;
+  const password=prompt('Por seguridad, ingresa tu contraseña para confirmar:');
+  if(password==null) return;
+  if(!password) return _profileError('Contraseña requerida para eliminar la cuenta');
+  try{
+    if(window.SYNC) await SYNC.deleteAccount(password);
+    AUTH.clear();
+    if(window.API) await API.clearAll();
+    localStorage.clear();
+    location.reload();
+  }catch(err){
+    _profileError(err.message||'No se pudo eliminar la cuenta');
+  }
+}
+
+function _profileError(msg){
+  const e=document.getElementById('profile-modal-error');
+  if(e){e.textContent=msg;e.style.display='block';}
 }
 
 async function authRegister(){
@@ -1699,6 +1824,46 @@ async function _analyzeFood(){
           onkeydown="if(event.key==='Enter') authLogin()">
       </div>
       <button class="auth-btn" onclick="authLogin()" id="login-btn">Entrar</button>
+      <p style="text-align:center;margin:10px 0 0;font-size:12px;color:#8A8A82">
+        <a href="#" onclick="showForgotPassword(event)" style="color:#4DEB6E;text-decoration:none;">¿Olvidaste tu contraseña?</a>
+      </p>
+    </div>
+
+    <!-- FORGOT PASSWORD -->
+    <div id="auth-forgot" class="auth-section">
+      <p style="color:#8A8A82;font-size:13px;margin:0 0 16px">Ingresa tu email y te enviaremos un enlace para recuperar tu contraseña.</p>
+      <div class="auth-field">
+        <label>Correo electrónico</label>
+        <input id="forgot-email" type="email" placeholder="tu@email.com" autocomplete="email"
+          onkeydown="if(event.key==='Enter') sendForgotPassword()">
+      </div>
+      <button class="auth-btn" onclick="sendForgotPassword()" id="forgot-btn">Enviar enlace</button>
+      <p style="text-align:center;margin:10px 0 0;font-size:12px;color:#8A8A82">
+        <a href="#" onclick="hideForgotPassword(event)" style="color:#4DEB6E;text-decoration:none;">← Volver al inicio de sesión</a>
+      </p>
+    </div>
+
+    <!-- RESET PASSWORD (llegamos aquí desde el enlace del email) -->
+    <div id="auth-reset" class="auth-section">
+      <div style="text-align:center;margin-bottom:16px;">
+        <div style="font-size:24px;margin-bottom:6px;">🔑</div>
+        <div style="font-weight:700;font-size:16px;color:#F2F2EF;">Nueva contraseña</div>
+        <p style="color:#8A8A82;font-size:13px;margin:6px 0 0">Elige una contraseña segura de al menos 8 caracteres.</p>
+      </div>
+      <div class="auth-field">
+        <label>Nueva contraseña</label>
+        <input id="reset-password" type="password" placeholder="••••••••" autocomplete="new-password" minlength="8"
+          onkeydown="if(event.key==='Enter') submitResetPassword()">
+      </div>
+      <div class="auth-field">
+        <label>Confirmar contraseña</label>
+        <input id="reset-password-confirm" type="password" placeholder="••••••••" autocomplete="new-password" minlength="8"
+          onkeydown="if(event.key==='Enter') submitResetPassword()">
+      </div>
+      <button class="auth-btn" onclick="submitResetPassword()" id="reset-btn">Guardar contraseña</button>
+      <p style="text-align:center;margin:10px 0 0;font-size:12px;color:#8A8A82">
+        <a href="#" onclick="hideResetPassword(event)" style="color:#4DEB6E;text-decoration:none;">← Volver al inicio de sesión</a>
+      </p>
     </div>
 
     <!-- REGISTER multi-paso -->
@@ -1846,6 +2011,7 @@ async function _analyzeFood(){
     </div>
     <div id="profile-modal-error" style="display:none;color:#ff6b6b;font-size:12px;margin-bottom:8px;"></div>
     <button class="auth-btn" onclick="saveProfileEdit()" id="prof-save-btn">Guardar cambios</button>
+    <button class="auth-btn danger" onclick="deleteAccountFlow()">Eliminar mi cuenta</button>
   </div>
 </div>
 
@@ -3419,16 +3585,22 @@ document.addEventListener('DOMContentLoaded', async () => {
     console.error('[FitTracker] Auth no disponible — revisa la consola');
     return;
   }
-  const hasSession = AUTH.load();
-  if (hasSession) {
-    const valid = await AUTH.refresh();
-    if (valid) {
-      await _onAuthSuccess();
-    } else {
-      document.getElementById('auth-screen')?.classList.remove('hidden');
+  // Si la URL contiene ?token= de un enlace de recuperación, mostrar el
+  // formulario de nueva contraseña independientemente de si hay sesión.
+  if (_checkPasswordResetToken()) {
+    document.getElementById('auth-screen')?.classList.remove('hidden');
+  } else {
+    const hasSession = AUTH.load();
+    if (hasSession) {
+      const valid = await AUTH.refresh();
+      if (valid) {
+        await _onAuthSuccess();
+      } else {
+        document.getElementById('auth-screen')?.classList.remove('hidden');
+      }
     }
+    // If no session, auth screen stays visible (it's shown by default)
   }
-  // If no session, auth screen stays visible (it's shown by default)
 
   // ── App init ──
   try { await load(); } catch(e) { console.error('[FitTracker] load() error:', e); }
