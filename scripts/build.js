@@ -1,87 +1,95 @@
 #!/usr/bin/env node
-
 /**
  * FitTracker Build Script
- * Minifies JS/CSS files and prepares assets for production
+ * Prepara los assets para producción.
+ * Variables de entorno:
+ *   NODE_ENV=production          — activa minificación
+ *   PRODUCTION_BACKEND_URL=https://api.midominio.com  — inyecta URL en config.js
  */
 
-const fs = require('fs');
+const fs   = require('fs');
 const path = require('path');
 
-const wwwDir = path.join(__dirname, '..', 'www');
-const isProduction = process.env.NODE_ENV === 'production';
+const wwwDir      = path.join(__dirname, '..', 'www');
+const isProd      = process.env.NODE_ENV === 'production';
+const prodBackend = process.env.PRODUCTION_BACKEND_URL || '';
 
-console.log('[BUILD] FitTracker app builder started...');
+console.log('[BUILD] FitTracker build iniciado...');
+console.log(`[BUILD] Modo: ${isProd ? 'production' : 'development'}`);
+if (prodBackend) console.log(`[BUILD] Backend URL: ${prodBackend}`);
 
-// Files to optimize
+// ── 1. Inyectar URL de producción en config.js ──────────────────
+if (prodBackend) {
+  const configPath = path.join(wwwDir, 'config.js');
+  let cfg = fs.readFileSync(configPath, 'utf8');
+  cfg = cfg.replace(/'__PRODUCTION_BACKEND_URL__'/, `'${prodBackend}'`);
+  fs.writeFileSync(configPath, cfg, 'utf8');
+  console.log(`[OK] config.js → PRODUCTION_BACKEND_URL inyectada`);
+}
+
+// ── 2. Minificación básica de JS ─────────────────────────────────
 const jsFiles = [
-  'db.js',
-  'api.js',
-  'sw.js',
+  'config.js', 'db.js', 'sync.js', 'api.js', 'sw.js',
+  'notifications.js', 'personalization.js', 'streaks.js',
   'assets/ml/vision-service.js',
   'assets/ml/food-detector.js',
   'assets/ml/pose-analyzer.js',
-  'assets/ml/progress-tracker.js'
+  'assets/ml/progress-tracker.js',
 ];
 
-const cssFiles = [];
-
-// Minify JS files
 jsFiles.forEach(file => {
   const filePath = path.join(wwwDir, file);
-  
   if (!fs.existsSync(filePath)) {
-    console.warn(`[WARN] File not found: ${file}`);
+    console.warn(`[WARN] No encontrado: ${file}`);
     return;
   }
-  
   try {
     let content = fs.readFileSync(filePath, 'utf8');
-    
-    // Simple minification (in production, use terser)
-    if (isProduction) {
-      // Remove comments
-      content = content.replace(/\/\*[\s\S]*?\*\//g, '');
-      content = content.replace(/\/\/.*$/gm, '');
-      // Remove extra whitespace
-      content = content.replace(/\s+/g, ' ');
-      content = content.replace(/\s*([{}();,=[]{}:])\s*/g, '$1');
+    const originalSize = Buffer.byteLength(content, 'utf8');
+
+    if (isProd) {
+      content = content.replace(/\/\*[\s\S]*?\*\//g, '');  // block comments
+      content = content.replace(/^\s*\/\/.*$/gm, '');       // line comments
+      content = content.replace(/\n\s*\n/g, '\n');          // empty lines
     }
-    
-    // Write file
+
     fs.writeFileSync(filePath, content, 'utf8');
-    const sizeKB = (Buffer.byteLength(content, 'utf8') / 1024).toFixed(2);
-    console.log(`[OK] ${file} - ${sizeKB} KB`);
+    const newSize = Buffer.byteLength(content, 'utf8');
+    const pct     = (((originalSize - newSize) / originalSize) * 100).toFixed(0);
+    console.log(`[OK] ${file.padEnd(45)} ${(newSize/1024).toFixed(1)} KB${isProd ? ` (-${pct}%)` : ''}`);
   } catch (err) {
-    console.error(`[ERROR] Processing ${file}:`, err.message);
+    console.error(`[ERROR] ${file}: ${err.message}`);
   }
 });
 
-// Verify critical files
-console.log('\n[CHECK] Verifying critical files...');
-const criticalFiles = [
-  'index.html',
-  'manifest.json',
-  'db.js',
-  'api.js',
-  'sw.js',
+// ── 3. Verificar archivos críticos ───────────────────────────────
+console.log('\n[CHECK] Archivos críticos:');
+const critical = [
+  'index.html', 'manifest.json', 'config.js',
+  'db.js', 'sync.js', 'api.js', 'sw.js',
   'assets/ml/vision-service.js',
-  'assets/ml/food-detector.js',
-  'assets/ml/pose-analyzer.js',
-  'assets/ml/progress-tracker.js'
 ];
 
-criticalFiles.forEach(file => {
+let allOk = true;
+critical.forEach(file => {
   const filePath = path.join(wwwDir, file);
   if (fs.existsSync(filePath)) {
-    const size = fs.statSync(filePath).size;
-    console.log(`✓ ${file} (${(size / 1024).toFixed(2)} KB)`);
+    const kb = (fs.statSync(filePath).size / 1024).toFixed(1);
+    console.log(`  ✓ ${file} (${kb} KB)`);
   } else {
-    console.error(`✗ ${file} - MISSING!`);
+    console.error(`  ✗ ${file} — FALTA`);
+    allOk = false;
   }
 });
 
-console.log('\n[BUILD] Build complete! App ready for deployment.');
-console.log('[INFO] Next steps:');
-console.log('  - Run: npm run build:android');
-console.log('  - Or: npx cap sync && npx cap open android');
+if (!allOk) {
+  console.error('\n[ERROR] Faltan archivos críticos — build incompleto');
+  process.exit(1);
+}
+
+console.log('\n[BUILD] ✅ Build completo.');
+if (!prodBackend) {
+  console.log('[INFO] Para producción:');
+  console.log('  PRODUCTION_BACKEND_URL=https://api.tudominio.com NODE_ENV=production npm run build');
+  console.log('  Luego: npm run build:android');
+}

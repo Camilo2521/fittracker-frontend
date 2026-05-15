@@ -448,6 +448,20 @@ class BackendSync {
   getYoloSummary() { return this._authGet('/api/v1/yolo/summary'); }
   clearYoloSession() { return this._authDelete('/api/v1/yolo/session'); }
 
+  async bodyScan(imageBase64, gender = 'male') {
+    try {
+      const res = await fetch(`${this.baseUrl}/api/v1/yolo/body-scan`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ imageBase64, gender }),
+        signal:  AbortSignal.timeout(25000),
+      });
+      return await res.json().catch(() => ({}));
+    } catch {
+      return { personDetected: false, error: 'Servicio no disponible' };
+    }
+  }
+
   // ── Predictor neuronal ────────────────────────────────────────
   getForecast() { return this._authGet('/api/v1/progress/forecast'); }
 

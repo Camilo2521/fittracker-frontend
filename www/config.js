@@ -14,11 +14,21 @@
     const override = localStorage.getItem('fittracker_backend_url');
     if (override) return override.replace(/\/+$/, '');
 
+    // URL hardcodeada en tiempo de build (inyectada por build.js para producción)
+    // __PRODUCTION_BACKEND_URL__ es reemplazada por el script de build
+    const buildUrl = '__PRODUCTION_BACKEND_URL__';
+    if (buildUrl && !buildUrl.startsWith('__')) return buildUrl;
+
     const host = window.location.hostname;
 
     // Capacitor o fichero local — asumir localhost de desarrollo
     if (!host || host === 'localhost' || host === '127.0.0.1') {
-      return `http://localhost:${BACKEND_PORT}`;
+      // Preferir HTTPS si el backend HTTPS está disponible
+      const httpsPort = 3443;
+      const httpPort  = BACKEND_PORT;
+      return location.protocol === 'https:'
+        ? `https://localhost:${httpsPort}`
+        : `http://localhost:${httpPort}`;
     }
 
     // Cualquier otro host (LAN, subdominio, etc.) → mismo host, puerto del backend
